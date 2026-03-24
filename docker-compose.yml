@@ -1,0 +1,75 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: shadowledger-postgres
+    environment:
+      POSTGRES_DB: shadowledger
+      POSTGRES_USER: shadowledger
+      POSTGRES_PASSWORD: shadowledger
+    ports:
+      - "5432:5432"
+    volumes:
+      - shadowledger_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shadowledger -d shadowledger"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    image: python:3.11-slim
+    container_name: shadowledger-backend
+    working_dir: /workspace/backend
+    command: >
+      sh -c "pip install --no-cache-dir -r requirements.txt &&
+      alembic upgrade head &&
+      uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+    environment:
+      APP_NAME: ${APP_NAME:-ShadowLedger API}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      DEBUG: ${DEBUG:-true}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://shadowledger:shadowledger@postgres:5432/shadowledger}
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:4200}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-replace-with-a-generated-fernet-key}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      CLERK_JWT_KEY: ${CLERK_JWT_KEY:-}
+      CLERK_ISSUER: ${CLERK_ISSUER:-}
+      CLERK_JWKS_URL: ${CLERK_JWKS_URL:-https://api.clerk.com/v1/jwks}
+      CLERK_AUTHORIZED_PARTIES: ${CLERK_AUTHORIZED_PARTIES:-http://localhost:4200}
+    volumes:
+      - .:/workspace
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    image: node:20-alpine
+    container_name: shadowledger-frontend
+    working_dir: /workspace/frontend
+    command: sh -c "npm install && npx next dev --hostname 0.0.0.0 --port 4200"
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      RAILWAY_BACKEND_URL: ${RAILWAY_BACKEND_URL:-http://localhost:8000}
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-pk_test_your_publishable_key}
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:-sk_test_your_secret_key}
+      CHOKIDAR_USEPOLLING: "true"
+      WATCHPACK_POLLING: "true"
+    volumes:
+      - .:/workspace
+      - /workspace/frontend/node_modules
+    ports:
+      - "4200:4200"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  shadowledger_postgres_data:

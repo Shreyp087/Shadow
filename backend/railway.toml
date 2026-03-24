@@ -1,0 +1,22 @@
+# Deploy this service from the backend/ directory in Railway's monorepo settings.
+# Required Railway variables:
+# APP_NAME
+# ENVIRONMENT
+# DEBUG
+# DATABASE_URL
+# FRONTEND_ORIGIN
+# ANTHROPIC_API_KEY
+# ENCRYPTION_KEY
+# CLERK_JWT_KEY or CLERK_JWKS_URL
+# CLERK_ISSUER
+# CLERK_AUTHORIZED_PARTIES
+
+[build]
+builder = "NIXPACKS"
+
+[deploy]
+startCommand = "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"
+healthcheckPath = "/health"
+healthcheckTimeout = 120
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10

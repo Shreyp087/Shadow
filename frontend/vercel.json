@@ -1,0 +1,13 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "installCommand": "npm ci",
+  "buildCommand": "npm run build",
+  "cleanUrls": true,
+  "env": {
+    "NEXT_PUBLIC_API_URL": "@next-public-api-url",
+    "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY": "@next-public-clerk-publishable-key",
+    "CLERK_SECRET_KEY": "@clerk-secret-key",
+    "RAILWAY_BACKEND_URL": "@railway-backend-url"
+  }
+}

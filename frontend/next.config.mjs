@@ -1,3 +1,5 @@
+import { fileURLToPath } from "node:url";
+
 /** @type {import('next').NextConfig} */
 const isDevelopment = process.env.NODE_ENV !== "production";
 const railwayBackendUrl = process.env.RAILWAY_BACKEND_URL;
@@ -9,6 +11,7 @@ const hasRealRailwayUrl =
 const backendUrl = isDevelopment ? localApiUrl : railwayBackendUrl || localApiUrl;
 
 const nextConfig = {
+  outputFileTracingRoot: fileURLToPath(new URL(".", import.meta.url)),
   experimental: {
     externalDir: true
   },

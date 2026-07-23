@@ -12,11 +12,11 @@ import { cn } from "./utils";
 describe("createApiClient", () => {
   const getToken = vi.fn<() => Promise<string | null>>();
   const fetchMock = vi.fn();
-  const originalNodeEnv = process.env.NODE_ENV;
 
   beforeEach(() => {
     process.env.NEXT_PUBLIC_API_URL = "https://shadowledger.example.com";
-    process.env.NODE_ENV = "test";
+    delete process.env.NEXT_PUBLIC_DEMO_AUTH;
+    vi.stubEnv("NODE_ENV", "test");
     getToken.mockReset();
     getToken.mockResolvedValue("jwt-token");
     fetchMock.mockReset();
@@ -25,8 +25,9 @@ describe("createApiClient", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
     delete process.env.NEXT_PUBLIC_API_URL;
-    process.env.NODE_ENV = originalNodeEnv;
+    delete process.env.NEXT_PUBLIC_DEMO_AUTH;
   });
 
   it("unwraps run detail responses and forwards authorization headers", async () => {
@@ -173,6 +174,86 @@ describe("createApiClient", () => {
     expect(headers.get("Accept")).toBe("application/pdf");
   });
 
+  it("loads, updates, and tests independent LLM role settings", async () => {
+    const hostedSetting = {
+      role: "attacker",
+      provider: "hosted_openai",
+      model_name: "gpt-4o-mini",
+      base_url: "https://api.openai.com/v1",
+      api_key_configured: true,
+      is_default: false
+    };
+    const localSetting = {
+      role: "attacker",
+      provider: "local_openai_compatible",
+      model_name: "mistralai/ministral-3-14b-reasoning",
+      base_url: "http://127.0.0.1:1234/v1",
+      api_key_configured: false,
+      is_default: false
+    };
+
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: [hostedSetting], error: null, meta: {} }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: localSetting, error: null, meta: {} }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: {
+              role: "attacker",
+              ok: true,
+              message: "LM Studio responded successfully.",
+              model_name: "mistralai/ministral-3-14b-reasoning",
+              base_url: "http://127.0.0.1:1234/v1",
+              latency_ms: 184
+            },
+            error: null,
+            meta: {}
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      );
+
+    const client = createApiClient(getToken);
+
+    await expect(client.getLlmRoleSettings()).resolves.toEqual([hostedSetting]);
+    await expect(
+      client.updateLlmRoleSetting("attacker", {
+        provider: "local_openai_compatible",
+        model_name: "mistralai/ministral-3-14b-reasoning",
+        base_url: "http://127.0.0.1:1234/v1"
+      })
+    ).resolves.toEqual(localSetting);
+    await expect(client.testLlmRoleSetting("attacker")).resolves.toMatchObject({
+      ok: true,
+      latency_ms: 184
+    });
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "https://shadowledger.example.com/api/v1/llm-role-settings",
+      "https://shadowledger.example.com/api/v1/llm-role-settings/attacker",
+      "https://shadowledger.example.com/api/v1/llm-role-settings/attacker/test"
+    ]);
+    expect(fetchMock.mock.calls[1][1]).toMatchObject({
+      method: "PUT",
+      body: JSON.stringify({
+        provider: "local_openai_compatible",
+        model_name: "mistralai/ministral-3-14b-reasoning",
+        base_url: "http://127.0.0.1:1234/v1"
+      })
+    });
+    expect(fetchMock.mock.calls[2][1]).toMatchObject({ method: "POST" });
+  });
+
   it("throws when tokens are unavailable or the API returns an envelope error", async () => {
     getToken.mockResolvedValueOnce(null);
 
@@ -223,7 +304,8 @@ describe("createApiClient", () => {
   });
 
   it("allows tokenless requests in development mode so local demo data can load", async () => {
-    process.env.NODE_ENV = "development";
+    vi.stubEnv("NODE_ENV", "development");
+    process.env.NEXT_PUBLIC_DEMO_AUTH = "true";
     getToken.mockResolvedValueOnce(null);
     fetchMock.mockResolvedValueOnce(
       new Response(
@@ -244,6 +326,33 @@ describe("createApiClient", () => {
     expect(runs).toEqual([]);
     const headers = new Headers(fetchMock.mock.calls[0][1].headers);
     expect(headers.get("Authorization")).toBeNull();
+  });
+
+  it("rejects tokenless requests when demo auth is not explicitly enabled", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    getToken.mockResolvedValueOnce(null);
+
+    const client = createApiClient(getToken);
+
+    await expect(client.getAttackRuns()).rejects.toMatchObject({
+      message: "Authentication token is unavailable.",
+      status: 401
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects tokenless requests in production even when the demo flag is set", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    process.env.NEXT_PUBLIC_DEMO_AUTH = "true";
+    getToken.mockResolvedValueOnce(null);
+
+    const client = createApiClient(getToken);
+
+    await expect(client.getAttackRuns()).rejects.toMatchObject({
+      message: "Authentication token is unavailable.",
+      status: 401
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

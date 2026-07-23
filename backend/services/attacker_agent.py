@@ -19,9 +19,6 @@ from .llm_client import request_text
 from .risk_scorer import RiskAssessment
 from .victim_connector import VictimConnector
 
-ATTACKER_MODEL = os.getenv("OPENAI_ATTACKER_MODEL", "gpt-4o-mini")
-
-
 class AttackResultScorer(Protocol):
     async def score(self, prompt_sent: str, response_received: str, vector_category: str) -> RiskAssessment: ...
 
@@ -49,6 +46,7 @@ class AttackerAgent:
         scorer_service: AttackResultScorer,
         trust_ledger: TrustLedgerAppender,
         mutation_engine: AttackMutationEngine,
+        model_name: str | None = None,
     ) -> None:
         self.db_session = db_session
         self.llm_client = llm_client
@@ -56,6 +54,7 @@ class AttackerAgent:
         self.scorer_service = scorer_service
         self.trust_ledger = trust_ledger
         self.mutation_engine = mutation_engine
+        self.model_name = model_name or os.getenv("OPENAI_ATTACKER_MODEL", "gpt-4o-mini")
 
     async def run_attack_vector(
         self,
@@ -208,7 +207,7 @@ class AttackerAgent:
         try:
             adapted_instruction = await request_text(
                 self.llm_client,
-                model=ATTACKER_MODEL,
+                model=self.model_name,
                 max_tokens=220,
                 temperature=0.3,
                 system_prompt=(

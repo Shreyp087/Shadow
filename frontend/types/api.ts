@@ -13,6 +13,8 @@ export type AttackVectorCategory =
 export type SeverityLevel = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 export type RiskCategory = "SAFE" | "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 export type AttackSurfaceTrend = "IMPROVING" | "WORSENING" | "STABLE";
+export type LLMRole = "attacker" | "mutator" | "judge";
+export type LLMProvider = "hosted_openai" | "local_openai_compatible";
 
 export type JsonValue =
   | string
@@ -60,10 +62,35 @@ export interface TargetSystemResponse {
   description: string | null;
   api_endpoint: string;
   target_type: TargetSystemType;
-  api_key_masked: string;
+  api_key_configured: boolean;
   model_name: string;
   created_at: ISODateTimeString;
   is_active: boolean;
+}
+
+export interface LLMRoleSettingResponse {
+  role: LLMRole;
+  provider: LLMProvider;
+  model_name: string;
+  base_url: string | null;
+  api_key_configured: boolean;
+  is_default: boolean;
+}
+
+export interface UpdateLLMRoleSettingRequest {
+  provider: LLMProvider;
+  model_name: string;
+  base_url: string | null;
+  api_key?: string;
+}
+
+export interface LLMConnectionTestResponse {
+  role: LLMRole;
+  ok: boolean;
+  message: string;
+  model_name: string;
+  base_url: string | null;
+  latency_ms: number | null;
 }
 
 export interface CreateAttackRunRequest {

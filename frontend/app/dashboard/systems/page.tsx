@@ -1,6 +1,7 @@
 "use client";
 
-import { type FormEvent, useEffect, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { type FormEvent, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { useApiClient } from "@/lib/api-client";
@@ -16,19 +17,52 @@ const initialFormState: CreateTargetSystemRequest = {
   is_active: true
 };
 
-function formatMaskedApiKey(maskedApiKey: string) {
-  const suffix = maskedApiKey.slice(-4);
-  return `sk-...${suffix}`;
-}
+const providerGuidance: Record<
+  TargetSystemType,
+  {
+    credential: string;
+    credentialPlaceholder: string;
+    endpoint: string;
+    endpointPlaceholder: string;
+    label: string;
+    model: string;
+    modelPlaceholder: string;
+  }
+> = {
+  openai_compatible: {
+    label: "OpenAI-compatible",
+    endpoint:
+      "Use the provider base URL or its full /chat/completions route. ShadowLedger normalizes either form.",
+    endpointPlaceholder: "https://api.openai.com/v1",
+    model: "Enter the exact chat model ID enabled by your provider.",
+    modelPlaceholder: "gpt-4o-mini",
+    credential: "Use the provider API key sent as an Authorization bearer credential.",
+    credentialPlaceholder: "Provider API key"
+  },
+  anthropic: {
+    label: "Anthropic",
+    endpoint: "Use the Anthropic API base URL or the full /v1/messages endpoint.",
+    endpointPlaceholder: "https://api.anthropic.com",
+    model: "Enter an exact Claude model ID enabled for your Anthropic account.",
+    modelPlaceholder: "claude-model-id",
+    credential: "Use an Anthropic API key; requests authenticate through the x-api-key header.",
+    credentialPlaceholder: "Anthropic API key"
+  }
+};
 
 export default function SystemsPage() {
   const apiClient = useApiClient();
+  const router = useRouter();
   const [systems, setSystems] = useState<TargetSystemResponse[]>([]);
   const [form, setForm] = useState<CreateTargetSystemRequest>(initialFormState);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
+  const [isCreating, setIsCreating] = useState(false);
+  const [runningSystemId, setRunningSystemId] = useState<string | null>(null);
+  const [runError, setRunError] = useState<{ message: string; systemId: string } | null>(null);
+
+  const guidance = providerGuidance[form.target_type];
 
   useEffect(() => {
     let active = true;
@@ -67,24 +101,64 @@ export default function SystemsPage() {
     }));
   }
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
     setSuccessMessage(null);
 
-    startTransition(async () => {
-      try {
-        const created = await apiClient.createTargetSystem({
-          ...form,
-          description: form.description || null
-        });
-        setSystems((current) => [created, ...current]);
-        setSuccessMessage(`Stored ${created.name}.`);
-        setForm(initialFormState);
-      } catch (requestError) {
-        setError(requestError instanceof Error ? requestError.message : "Unable to create target system.");
-      }
-    });
+    const payload: CreateTargetSystemRequest = {
+      ...form,
+      description: form.description || null
+    };
+
+    // Do not retain credentials in component state while the protected request is in flight.
+    setForm((current) => ({
+      ...current,
+      api_key: ""
+    }));
+
+    setIsCreating(true);
+    try {
+      const created = await apiClient.createTargetSystem(payload);
+      setSystems((current) => [created, ...current]);
+      setSuccessMessage(`Stored ${created.name}.`);
+      setForm(initialFormState);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to create target system.");
+    } finally {
+      setIsCreating(false);
+    }
+  }
+
+  async function handleRunScan(system: TargetSystemResponse) {
+    if (!system.is_active || runningSystemId) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Run every active attack vector against ${system.name}? This sends prompts to the target and may incur provider charges.`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setRunError(null);
+    setRunningSystemId(system.id);
+
+    try {
+      const attackRun = await apiClient.createAttackRun({
+        target_system_id: system.id,
+        vector_category_filter: null
+      });
+      router.push(`/dashboard/runs/${attackRun.id}`);
+    } catch (requestError) {
+      setRunError({
+        message: requestError instanceof Error ? requestError.message : "Unable to start a scan.",
+        systemId: system.id
+      });
+    } finally {
+      setRunningSystemId(null);
+    }
   }
 
   return (
@@ -95,8 +169,9 @@ export default function SystemsPage() {
           Register the AI systems you want ShadowLedger to probe
         </h2>
         <p className="mt-3 text-sm leading-7 text-muted-foreground">
-          This form uses the authenticated Clerk identity automatically and encrypts the API key on the backend
-          before it is stored.
+          Target reads, registration, and scan launches use the authenticated API client, including your Clerk bearer
+          token whenever Clerk authentication is enabled. The backend encrypts the credential and only reports whether
+          one is configured; it never returns the key or a recognizable suffix.
         </p>
 
         <form onSubmit={handleSubmit} className="mt-6 space-y-4">
@@ -106,6 +181,7 @@ export default function SystemsPage() {
             value={form.name}
             onChange={(value) => updateField("name", value)}
             placeholder="Support triage assistant"
+            required
           />
           <Field
             id="system-description"
@@ -115,14 +191,6 @@ export default function SystemsPage() {
             placeholder="Describe the assistant, domain, and trust boundary."
             multiline
           />
-          <Field
-            id="api-endpoint"
-            label="API endpoint"
-            value={form.api_endpoint}
-            onChange={(value) => updateField("api_endpoint", value)}
-            placeholder="https://example.com/v1/chat/completions"
-          />
-
           <div className="space-y-2">
             <label htmlFor="target-type" className="text-sm font-medium">
               Target type
@@ -133,26 +201,50 @@ export default function SystemsPage() {
               onChange={(event) => updateField("target_type", event.target.value as TargetSystemType)}
               className="h-12 w-full rounded-2xl border bg-background px-4 text-sm outline-none transition focus:border-primary"
             >
-              <option value="openai_compatible">openai_compatible</option>
-              <option value="anthropic">anthropic</option>
+              <option value="openai_compatible">OpenAI-compatible</option>
+              <option value="anthropic">Anthropic</option>
             </select>
           </div>
+
+          <div className="rounded-2xl border border-teal-100 bg-teal-50/70 p-4 text-sm text-teal-950">
+            <p className="font-medium">{guidance.label} request settings</p>
+            <ul className="mt-2 list-disc space-y-1 pl-5 text-xs leading-5 text-teal-900/80">
+              <li>{guidance.endpoint}</li>
+              <li>{guidance.model}</li>
+              <li>{guidance.credential}</li>
+            </ul>
+          </div>
+
+          <Field
+            id="api-endpoint"
+            label="API endpoint"
+            value={form.api_endpoint}
+            onChange={(value) => updateField("api_endpoint", value)}
+            placeholder={guidance.endpointPlaceholder}
+            hint={guidance.endpoint}
+            type="url"
+            required
+          />
 
           <Field
             id="model-name"
             label="Model name"
             value={form.model_name}
             onChange={(value) => updateField("model_name", value)}
-            placeholder="gpt-4o-mini"
+            placeholder={guidance.modelPlaceholder}
+            hint={guidance.model}
+            required
           />
           <Field
             id="api-key"
             label="API key"
             value={form.api_key}
             onChange={(value) => updateField("api_key", value)}
-            placeholder="sk-..."
+            placeholder={guidance.credentialPlaceholder}
+            hint={`${guidance.credential} Cleared from this form as soon as submission begins.`}
             type="password"
             autoComplete="new-password"
+            required
           />
 
           <label className="flex items-center gap-3 rounded-2xl border bg-muted/60 px-4 py-3 text-sm">
@@ -168,8 +260,8 @@ export default function SystemsPage() {
           {error ? <p className="text-sm text-orange-600">{error}</p> : null}
           {successMessage ? <p className="text-sm text-teal-700">{successMessage}</p> : null}
 
-          <Button type="submit" size="lg" className="w-full" disabled={isPending}>
-            {isPending ? "Saving target..." : "Create target system"}
+          <Button type="submit" size="lg" className="w-full" disabled={isCreating}>
+            {isCreating ? "Saving target..." : "Create target system"}
           </Button>
         </form>
       </section>
@@ -223,10 +315,32 @@ export default function SystemsPage() {
                     <dd className="mt-1">{system.target_type}</dd>
                   </div>
                   <div>
-                    <dt className="text-xs uppercase tracking-[0.22em] text-muted-foreground">API key</dt>
-                    <dd className="mt-1 font-mono">{formatMaskedApiKey(system.api_key_masked)}</dd>
+                    <dt className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Credential</dt>
+                    <dd className="mt-1">{system.api_key_configured ? "Configured and encrypted" : "Not configured"}</dd>
                   </div>
                 </dl>
+                <div className="mt-5 border-t pt-4">
+                  <Button
+                    type="button"
+                    className="w-full"
+                    onClick={() => void handleRunScan(system)}
+                    disabled={!system.is_active || runningSystemId !== null}
+                    title={system.is_active ? undefined : "Activate this target before starting a scan."}
+                  >
+                    {runningSystemId === system.id ? "Starting scan..." : "Run Full Scan"}
+                  </Button>
+                  {system.is_active ? (
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Runs every active vector and may consume both orchestration and target-provider credits.
+                    </p>
+                  ) : null}
+                  {!system.is_active ? (
+                    <p className="mt-2 text-xs text-muted-foreground">Inactive targets cannot start new scans.</p>
+                  ) : null}
+                  {runError?.systemId === system.id ? (
+                    <p className="mt-2 text-sm text-orange-600">{runError.message}</p>
+                  ) : null}
+                </div>
               </article>
             ))}
           </div>
@@ -246,9 +360,11 @@ interface FieldProps {
   value: string;
   onChange: (value: string) => void;
   placeholder: string;
+  hint?: string;
   multiline?: boolean;
-  type?: "text" | "password";
+  type?: "text" | "password" | "url";
   autoComplete?: string;
+  required?: boolean;
 }
 
 function Field({
@@ -257,9 +373,11 @@ function Field({
   value,
   onChange,
   placeholder,
+  hint,
   multiline = false,
   type = "text",
-  autoComplete
+  autoComplete,
+  required = false
 }: FieldProps) {
   const sharedClasses =
     "w-full rounded-2xl border bg-background px-4 text-sm outline-none transition focus:border-primary";
@@ -275,6 +393,8 @@ function Field({
           value={value}
           onChange={(event) => onChange(event.target.value)}
           placeholder={placeholder}
+          required={required}
+          aria-describedby={hint ? `${id}-hint` : undefined}
           className={`${sharedClasses} min-h-[112px] py-3`}
         />
       ) : (
@@ -285,9 +405,16 @@ function Field({
           onChange={(event) => onChange(event.target.value)}
           placeholder={placeholder}
           autoComplete={autoComplete}
+          required={required}
+          aria-describedby={hint ? `${id}-hint` : undefined}
           className={`${sharedClasses} h-12`}
         />
       )}
+      {hint ? (
+        <p id={`${id}-hint`} className="text-xs leading-5 text-muted-foreground">
+          {hint}
+        </p>
+      ) : null}
     </div>
   );
 }

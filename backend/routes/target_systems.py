@@ -13,7 +13,7 @@ from models.user import User
 from routes._user_context import resolve_mutating_user, resolve_request_user
 from schemas.common import APIResponse
 from schemas.target_system import CreateTargetSystemRequest, TargetSystemResponse
-from utils.encryption import decrypt_value, encrypt_value
+from utils.encryption import encrypt_value
 
 router = APIRouter(prefix="/api/v1/target-systems", tags=["target-systems"])
 
@@ -50,7 +50,7 @@ async def create_target_system(
     user = await _get_mutating_user(db_session, clerk_user_id)
 
     try:
-        encrypted_api_key = encrypt_value(payload.api_key)
+        encrypted_api_key = encrypt_value(payload.api_key.get_secret_value())
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -61,7 +61,7 @@ async def create_target_system(
         user_id=user.id,
         name=payload.name,
         description=payload.description,
-        api_endpoint=payload.api_endpoint,
+        api_endpoint=str(payload.api_endpoint),
         target_type=payload.target_type,
         api_key_encrypted=encrypted_api_key,
         model_name=payload.model_name,
@@ -86,14 +86,6 @@ async def _get_mutating_user(db_session: AsyncSession, clerk_user_id: str) -> Us
 
 
 def _serialize_target_system(target_system: TargetSystem) -> TargetSystemResponse:
-    try:
-        decrypted_api_key = decrypt_value(target_system.api_key_encrypted)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to read the stored API key for this target system.",
-        ) from exc
-
     return TargetSystemResponse(
         id=target_system.id,
         user_id=target_system.user_id,
@@ -101,13 +93,8 @@ def _serialize_target_system(target_system: TargetSystem) -> TargetSystemRespons
         description=target_system.description,
         api_endpoint=target_system.api_endpoint,
         target_type=target_system.target_type,
-        api_key_masked=_mask_api_key(decrypted_api_key),
+        api_key_configured=bool(target_system.api_key_encrypted),
         model_name=target_system.model_name,
         created_at=target_system.created_at,
         is_active=target_system.is_active,
     )
-
-
-def _mask_api_key(api_key: str) -> str:
-    suffix = api_key[-4:] if len(api_key) >= 4 else api_key
-    return f"****{suffix}"

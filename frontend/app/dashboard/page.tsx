@@ -3,7 +3,7 @@
 import { AlertOctagon, ShieldAlert, Sigma, Swords } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type FormEvent, useEffect, useMemo, useState, useTransition } from "react";
+import { type FormEvent, useMemo, useState, useTransition } from "react";
 import useSWR from "swr";
 
 import { Badge } from "@/components/ui/badge";
@@ -20,7 +20,7 @@ import {
   DialogTrigger
 } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { buildApiUrl, useApiClient } from "@/lib/api-client";
+import { useApiClient } from "@/lib/api-client";
 import type {
   AttackRunResponse,
   AttackRunsSummaryResponse,
@@ -43,14 +43,6 @@ const riskBadgeVariants: Record<RiskCategory, "green" | "blue" | "yellow" | "ora
   CRITICAL: "red"
 };
 
-type DiagnosticBannerState = {
-  error: string | null;
-  results: number | null;
-  runs: number | null;
-  status: "idle" | "loading" | "success" | "error";
-  vulnerabilities: number | null;
-};
-
 export default function DashboardPage() {
   const apiClient = useApiClient();
   const router = useRouter();
@@ -58,81 +50,6 @@ export default function DashboardPage() {
   const [selectedTargetSystemId, setSelectedTargetSystemId] = useState("");
   const [createError, setCreateError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
-  const [diagnosticRefreshKey, setDiagnosticRefreshKey] = useState(0);
-  const [diagnostic, setDiagnostic] = useState<DiagnosticBannerState>({
-    error: null,
-    results: null,
-    runs: null,
-    status: "idle",
-    vulnerabilities: null
-  });
-
-  useEffect(() => {
-    let isActive = true;
-
-    async function loadDiagnostic() {
-      setDiagnostic((current) => ({
-        ...current,
-        error: null,
-        status: "loading"
-      }));
-
-      try {
-        const response = await fetch(buildApiUrl("/api/v1/attack-runs/summary"), {
-          cache: "no-store",
-          headers: {
-            Accept: "application/json"
-          }
-        });
-
-        const payload = (await response.json()) as {
-          data?: {
-            total_scans?: number;
-            vulnerabilities_found?: number;
-          } | null;
-          error?: string | null;
-          meta?: {
-            total_results?: number;
-          } | null;
-          detail?: string | Array<{ msg?: string } | string>;
-        };
-
-        if (!response.ok || payload.error) {
-          throw new Error(resolveDiagnosticError(payload, response.statusText));
-        }
-
-        if (!isActive) {
-          return;
-        }
-
-        setDiagnostic({
-          error: null,
-          results: Number(payload.meta?.total_results ?? 0),
-          runs: Number(payload.data?.total_scans ?? 0),
-          status: "success",
-          vulnerabilities: Number(payload.data?.vulnerabilities_found ?? 0)
-        });
-      } catch (error) {
-        if (!isActive) {
-          return;
-        }
-
-        setDiagnostic({
-          error: error instanceof Error ? error.message : "Unknown diagnostic fetch error.",
-          results: null,
-          runs: null,
-          status: "error",
-          vulnerabilities: null
-        });
-      }
-    }
-
-    void loadDiagnostic();
-
-    return () => {
-      isActive = false;
-    };
-  }, [diagnosticRefreshKey]);
 
   const {
     data: attackRuns = [],
@@ -163,6 +80,10 @@ export default function DashboardPage() {
 
   const targetSystemNameById = useMemo(
     () => new Map(targetSystems.map((system) => [system.id, system.name])),
+    [targetSystems]
+  );
+  const activeTargetSystemCount = useMemo(
+    () => targetSystems.filter((system) => system.is_active).length,
     [targetSystems]
   );
 
@@ -199,42 +120,6 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-8">
-      <Card className="overflow-hidden">
-        <div
-          className={
-            diagnostic.status === "success"
-              ? "h-3 bg-emerald-500"
-              : diagnostic.status === "error"
-                ? "h-3 bg-red-500"
-                : "h-3 bg-slate-300"
-          }
-        />
-        <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <CardTitle>Demo Data Diagnostic</CardTitle>
-            <CardDescription>
-              {diagnostic.status === "success"
-                ? "API reachable and returning demo data."
-                : diagnostic.status === "error"
-                  ? diagnostic.error
-                  : "Checking API reachability without auth headers."}
-            </CardDescription>
-            <p className="mt-3 text-sm font-medium">
-              {diagnostic.runs ?? "--"} runs | {diagnostic.results ?? "--"} results |{" "}
-              {diagnostic.vulnerabilities ?? "--"} vulnerabilities
-            </p>
-            <p className="mt-2 text-xs text-muted-foreground">Remove this banner before submission</p>
-          </div>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => setDiagnosticRefreshKey((current) => current + 1)}
-          >
-            Retry
-          </Button>
-        </CardHeader>
-      </Card>
-
       <section className="flex flex-col gap-4 rounded-[2rem] border bg-slate-950 px-6 py-8 text-white shadow-[0_30px_90px_rgba(15,23,42,0.18)] lg:flex-row lg:items-end lg:justify-between lg:px-8">
         <div className="max-w-3xl">
           <p className="text-xs uppercase tracking-[0.28em] text-teal-200/70">Operational overview</p>
@@ -244,6 +129,10 @@ export default function DashboardPage() {
           <p className="mt-4 text-sm leading-7 text-slate-300">
             The dashboard polls the backend every five seconds while a run is still executing, so critical changes
             surface without a manual refresh loop.
+          </p>
+          <p className="mt-2 text-xs leading-6 text-teal-100/80">
+            Dashboard data and scan actions use the authenticated API client, which supplies your Clerk bearer token
+            whenever Clerk authentication is enabled.
           </p>
         </div>
 
@@ -257,7 +146,8 @@ export default function DashboardPage() {
             <DialogHeader>
               <DialogTitle>Start a new attack run</DialogTitle>
               <DialogDescription>
-                Choose one registered target system and ShadowLedger will queue a new scan in the background.
+                Choose one registered target system and ShadowLedger will queue every active attack vector in the
+                background. This sends provider requests and may incur usage charges.
               </DialogDescription>
             </DialogHeader>
 
@@ -271,23 +161,23 @@ export default function DashboardPage() {
                   value={selectedTargetSystemId}
                   onChange={(event) => setSelectedTargetSystemId(event.target.value)}
                   className="h-12 w-full rounded-2xl border bg-background px-4 text-sm outline-none transition focus:border-primary"
-                  disabled={targetSystemsLoading || targetSystems.length === 0}
+                  disabled={targetSystemsLoading || activeTargetSystemCount === 0}
                 >
                   <option value="">
                     {targetSystemsLoading ? "Loading target systems..." : "Select a target system"}
                   </option>
                   {targetSystems.map((system) => (
-                    <option key={system.id} value={system.id}>
-                      {system.name} - {system.model_name}
+                    <option key={system.id} value={system.id} disabled={!system.is_active}>
+                      {system.name} - {system.model_name}{system.is_active ? "" : " (inactive)"}
                     </option>
                   ))}
                 </select>
               </div>
 
               {systemsErrorMessage ? <p className="text-sm text-orange-600">{systemsErrorMessage}</p> : null}
-              {!targetSystemsLoading && targetSystems.length === 0 ? (
+              {!targetSystemsLoading && activeTargetSystemCount === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  No target systems are available yet. Add one in{" "}
+                  No active, executable target systems are available. Add an authorized target in{" "}
                   <Link href="/dashboard/systems" className="font-medium text-primary underline underline-offset-4">
                     Target Systems
                   </Link>
@@ -302,7 +192,7 @@ export default function DashboardPage() {
                     Cancel
                   </Button>
                 </DialogClose>
-                <Button type="submit" disabled={isPending || targetSystems.length === 0}>
+                <Button type="submit" disabled={isPending || activeTargetSystemCount === 0}>
                   {isPending ? "Starting..." : "Start attack run"}
                 </Button>
               </DialogFooter>
@@ -520,34 +410,4 @@ function shortenIdentifier(value: string) {
   }
 
   return `${value.slice(0, 8)}...${value.slice(-4)}`;
-}
-
-function resolveDiagnosticError(
-  payload: {
-    error?: string | null;
-    detail?: string | Array<{ msg?: string } | string>;
-  },
-  fallback: string
-) {
-  if (payload.error) {
-    return payload.error;
-  }
-
-  if (typeof payload.detail === "string") {
-    return payload.detail;
-  }
-
-  if (Array.isArray(payload.detail)) {
-    return payload.detail
-      .map((item) => {
-        if (typeof item === "string") {
-          return item;
-        }
-
-        return item.msg ?? JSON.stringify(item);
-      })
-      .join("; ");
-  }
-
-  return fallback || "Diagnostic request failed.";
 }

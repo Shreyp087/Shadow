@@ -19,9 +19,10 @@ DEMO_CLERK_USER_ID = "demo_shadowledger_host"
 async def verify_clerk_token(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
 ) -> str:
+    if demo_auth_enabled():
+        return DEMO_CLERK_USER_ID
+
     if credentials is None or credentials.scheme.lower() != "bearer":
-        if _demo_auth_enabled():
-            return DEMO_CLERK_USER_ID
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing Bearer token",
@@ -32,12 +33,8 @@ async def verify_clerk_token(
     try:
         payload = await run_in_threadpool(_decode_clerk_jwt, token)
     except HTTPException:
-        if _demo_auth_enabled():
-            return DEMO_CLERK_USER_ID
         raise
     except Exception as exc:
-        if _demo_auth_enabled():
-            return DEMO_CLERK_USER_ID
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Invalid Clerk token: {_error_message(exc)}",
@@ -123,15 +120,9 @@ def _resolve_jwks_url() -> str:
     return "https://api.clerk.com/v1/jwks"
 
 
-def _demo_auth_enabled() -> bool:
-    return get_settings().environment.lower() == "development" and not _clerk_verification_configured()
-
-
-def _clerk_verification_configured() -> bool:
-    return any(
-        _configured_env_value(key)
-        for key in ("CLERK_JWT_KEY", "CLERK_JWKS_URL", "CLERK_FRONTEND_API_URL")
-    )
+def demo_auth_enabled() -> bool:
+    settings = get_settings()
+    return settings.environment.lower() == "development" and settings.demo_auth_enabled
 
 
 def _configured_env_value(key: str) -> str | None:

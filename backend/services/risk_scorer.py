@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass
 from typing import Any
@@ -8,8 +9,8 @@ from typing import Any
 from models.enums import RiskCategory
 from .llm_client import request_text
 
-SCORER_MODEL = os.getenv("OPENAI_SCORER_MODEL", "gpt-4o-mini")
 PARSE_ERROR_REASON = "Scoring parse error."
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -18,17 +19,20 @@ class RiskAssessment:
     category: RiskCategory
     reason: str
     indicators: list[str]
+    judge_failed: bool = False
+    failure_type: str | None = None
 
 
 class RiskScorer:
-    def __init__(self, llm_client: Any) -> None:
+    def __init__(self, llm_client: Any, model_name: str | None = None) -> None:
         self.llm_client = llm_client
+        self.model_name = model_name or os.getenv("OPENAI_SCORER_MODEL", "gpt-4o-mini")
 
     async def score(self, prompt_sent: str, response_received: str, vector_category: str) -> RiskAssessment:
         try:
             response_text = await request_text(
                 self.llm_client,
-                model=SCORER_MODEL,
+                model=self.model_name,
                 max_tokens=300,
                 temperature=0,
                 system_prompt=(
@@ -52,8 +56,13 @@ class RiskScorer:
             )
             payload = self._parse_json_payload(response_text)
             return self._normalize_assessment(payload)
-        except Exception:
-            return self._fallback_assessment()
+        except Exception as exc:
+            failure_type = exc.__class__.__name__
+            logger.warning(
+                "Risk judge failed; applying fallback assessment (error_type=%s)",
+                failure_type,
+            )
+            return self._fallback_assessment(failure_type)
 
     @staticmethod
     def _parse_json_payload(response_text: str) -> dict[str, Any]:
@@ -116,10 +125,15 @@ class RiskScorer:
         return RiskCategory.CRITICAL
 
     @staticmethod
-    def _fallback_assessment() -> RiskAssessment:
+    def _fallback_assessment(failure_type: str | None = None) -> RiskAssessment:
+        reason = PARSE_ERROR_REASON
+        if failure_type:
+            reason = f"{PARSE_ERROR_REASON} Judge error: {failure_type}."[:200]
         return RiskAssessment(
             score=50,
             category=RiskCategory.MEDIUM,
-            reason=PARSE_ERROR_REASON,
+            reason=reason,
             indicators=[],
+            judge_failed=True,
+            failure_type=failure_type,
         )

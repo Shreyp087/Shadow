@@ -1,6 +1,7 @@
 "use client";
 
 import { AlertTriangle, BarChart3, Clock3, Download, Fingerprint, ShieldAlert } from "lucide-react";
+import { useParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import useSWR from "swr";
@@ -64,15 +65,8 @@ const riskScoreToneClasses: Record<RiskCategory, string> = {
 const orderedRiskCategories: RiskCategory[] = ["SAFE", "LOW", "MEDIUM", "HIGH", "CRITICAL"];
 const filterOptions: FilterOption[] = ["ALL", "CRITICAL", "HIGH", "MEDIUM", "LOW", "SAFE"];
 
-interface RunDetailPageProps {
-  params: {
-    runId: string;
-  };
-}
-
-export default function RunDetailPage({
-  params
-}: RunDetailPageProps) {
+export default function RunDetailPage() {
+  const { runId } = useParams<{ runId: string }>();
   const apiClient = useApiClient();
   const [activeFilter, setActiveFilter] = useState<FilterOption>("ALL");
   const [currentPage, setCurrentPage] = useState(1);
@@ -84,7 +78,7 @@ export default function RunDetailPage({
     data: runDetail,
     error: runDetailError,
     isLoading: runDetailLoading
-  } = useSWR(["attack-run-detail", params.runId], () => apiClient.getAttackRunDetail(params.runId), {
+  } = useSWR(["attack-run-detail", runId], () => apiClient.getAttackRunDetail(runId), {
     refreshInterval: (currentData) => (currentData?.run.status === "RUNNING" ? 3000 : 0)
   });
 
@@ -92,7 +86,7 @@ export default function RunDetailPage({
     data: runResultsData,
     error: runResultsError,
     isLoading: runResultsLoading
-  } = useSWR(["attack-run-results", params.runId], () => apiClient.getAllRunResults(params.runId), {
+  } = useSWR(["attack-run-results", runId], () => apiClient.getAllRunResults(runId), {
     refreshInterval: runDetail?.run.status === "RUNNING" ? 3000 : 0
   });
 
@@ -103,7 +97,7 @@ export default function RunDetailPage({
 
   const run = runDetail?.run ?? null;
   const summary = runDetail?.summary;
-  const allResults = runResultsData?.results ?? [];
+  const allResults = useMemo(() => runResultsData?.results ?? [], [runResultsData?.results]);
   const targetSystemId = run?.target_system_id ?? null;
 
   const {
@@ -209,7 +203,7 @@ export default function RunDetailPage({
               <CardDescription className="text-xs uppercase tracking-[0.28em] text-teal-200/70">
                 Attack run detail
               </CardDescription>
-              <CardTitle className="mt-3 text-4xl text-white">Run {params.runId}</CardTitle>
+              <CardTitle className="mt-3 text-4xl text-white">Run {runId}</CardTitle>
               <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-300">
                 Inspect run state, risk distribution, and full result evidence while ShadowLedger continues polling
                 active executions every three seconds.

@@ -6,6 +6,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 
+import { useAppAuth } from "@/components/app-auth-provider";
 import { cn } from "@/lib/utils";
 
 const navigation = [
@@ -37,6 +38,7 @@ export default function DashboardLayout({
   children: ReactNode;
 }>) {
   const pathname = usePathname();
+  const { mode } = useAppAuth();
 
   return (
     <div className="min-h-screen py-6">
@@ -92,7 +94,13 @@ export default function DashboardLayout({
                 Red-team orchestration for AI systems
               </h1>
             </div>
-            <UserButton afterSignOutUrl="/" />
+            {mode === "demo" ? (
+              <span className="rounded-full bg-secondary px-3 py-2 text-xs font-medium text-secondary-foreground">
+                Local demo
+              </span>
+            ) : (
+              <UserButton afterSignOutUrl="/" />
+            )}
           </header>
 
           <main className="min-w-0 p-6 lg:p-8">{children}</main>

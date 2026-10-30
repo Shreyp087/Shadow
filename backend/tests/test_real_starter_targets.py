@@ -31,7 +31,11 @@ class MemorySession:
             while f"id_m{index}" in params:
                 values = {name.removesuffix(f"_m{index}"): value for name, value in params.items() if name.endswith(f"_m{index}")}
                 assert values["api_key_encrypted"] == ""
-                self.targets.setdefault(values["id"], values)
+                if values["id"] in self.targets:
+                    for field in ("name", "description", "role", "system_prompt"):
+                        self.targets[values["id"]][field] = values[field]
+                else:
+                    self.targets[values["id"]] = values
                 index += 1
             return Result([])
         return Result([identifier for identifier, row in self.targets.items()
@@ -45,6 +49,7 @@ def target_for(user_id):
     return TargetSystem(
         id=starter_target_id(user_id, spec.model), user_id=user_id,
         name=spec.name, description=spec.description, model_name=spec.model,
+        role=spec.role, system_prompt=spec.system_prompt,
         api_endpoint=OPENAI_ENDPOINT, target_type=TargetSystemType.OPENAI_COMPATIBLE,
         api_key_encrypted="", is_active=True, created_at=datetime.now(timezone.utc),
     )
@@ -57,13 +62,16 @@ def test_starters_are_real_isolated_idempotent_and_store_no_shared_key():
         await ensure_starter_targets(session, first)
         await ensure_starter_targets(session, first)
         assert len(session.targets) == 3
-        assert session.commits == 1
+        assert session.commits == 2
         await ensure_starter_targets(session, second)
         assert len(session.targets) == 6
         assert {row["model_name"] for row in session.targets.values()} == {
             "gpt-4.1-mini", "gpt-4.1-nano", "gpt-4o-mini"
         }
         assert all(row["api_endpoint"] == OPENAI_ENDPOINT for row in session.targets.values())
+        assert {row["role"] for row in session.targets.values()} == {"IT Support", "Restaurant Help", "Customer Support"}
+        assert all(row["system_prompt"].startswith("You are") for row in session.targets.values())
+        assert len({spec.system_prompt for spec in STARTER_TARGETS}) == 3
     asyncio.run(exercise())
 
 
@@ -93,3 +101,20 @@ def test_starters_without_app_key_report_connection_required(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     target = target_for(uuid4())
     assert _serialize_target_system(target).api_key_configured is False
+
+
+def test_existing_starter_is_upgraded_without_changing_credentials_or_history_id():
+    async def exercise():
+        session = MemorySession()
+        user_id = uuid4()
+        identifier = starter_target_id(user_id, STARTER_TARGETS[0].model)
+        session.targets[identifier] = {
+            "id": identifier, "user_id": user_id, "name": "OpenAI GPT-4.1 Mini",
+            "api_key_encrypted": "personal-encrypted-key", "is_active": False,
+        }
+        await ensure_starter_targets(session, user_id)
+        row = session.targets[identifier]
+        assert row["name"] == "IT Support" and row["system_prompt"] == STARTER_TARGETS[0].system_prompt
+        assert row["api_key_encrypted"] == "personal-encrypted-key" and row["is_active"] is False
+        assert row["id"] == identifier
+    asyncio.run(exercise())

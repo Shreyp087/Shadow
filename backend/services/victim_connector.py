@@ -79,9 +79,13 @@ class VictimConnector:
             )
 
     async def _send_openai_compatible(self, prompt: str, api_key: str) -> tuple[str, int | None]:
+        messages = []
+        if self.target_system.system_prompt:
+            messages.append({"role": "system", "content": self.target_system.system_prompt})
+        messages.append({"role": "user", "content": prompt})
         payload = {
             "model": self.target_system.model_name,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": messages,
         }
         headers = {
             "Authorization": f"Bearer {api_key}",
@@ -118,6 +122,7 @@ class VictimConnector:
                 model=self.target_system.model_name,
                 max_tokens=1024,
                 messages=[{"role": "user", "content": prompt}],
+                **({"system": self.target_system.system_prompt} if self.target_system.system_prompt else {}),
             )
 
         return self._extract_anthropic_response_text(message), self._extract_anthropic_tokens(message)

@@ -48,6 +48,8 @@ export interface UserResponse {
 export interface CreateTargetSystemRequest {
   name: string;
   description: string | null;
+  role?: string;
+  system_prompt?: string;
   api_endpoint: string;
   target_type: TargetSystemType;
   api_key: string;
@@ -60,6 +62,8 @@ export interface TargetSystemResponse {
   user_id: UUID;
   name: string;
   description: string | null;
+  role?: string;
+  system_prompt?: string;
   api_endpoint: string;
   target_type: TargetSystemType;
   api_key_configured: boolean;
@@ -114,6 +118,7 @@ export interface AttackRunResponse {
   status: AttackRunStatus;
   started_at: ISODateTimeString | null;
   completed_at: ISODateTimeString | null;
+  failure_reason?: string | null;
   total_attacks: number;
   vulnerabilities_found: number;
   risk_score_avg: DecimalString | null;

@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useApiClient } from "@/lib/api-client";
+import { isActiveRun } from "@/lib/run-status";
 import type {
   AttackRunResponse,
   AttackRunsSummaryResponse,
@@ -58,10 +59,10 @@ export default function DashboardPage() {
     mutate: mutateAttackRuns
   } = useSWR("attack-runs", () => apiClient.getAttackRuns(), {
     refreshInterval: (currentData: AttackRunResponse[] | undefined) =>
-      currentData?.some((run) => run.status === "RUNNING") ? 5000 : 0
+      currentData?.some((run) => isActiveRun(run.status)) ? 5000 : 0
   });
 
-  const hasRunningRun = attackRuns.some((run) => run.status === "RUNNING");
+  const hasRunningRun = attackRuns.some((run) => isActiveRun(run.status));
 
   const {
     data: summary,

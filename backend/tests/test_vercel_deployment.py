@@ -11,6 +11,7 @@ from app.db.session import get_db_session
 from app.main import app
 from app.workflows import scans
 from app.workflows import scan_steps
+from app.workflows import scan_runtime
 from models.attack_result import AttackResult
 from models.enums import AttackRunStatus, RiskCategory
 
@@ -83,7 +84,7 @@ def test_redelivered_attempt_does_not_call_provider_or_commit_twice(monkeypatch)
         @asynccontextmanager
         async def context():
             yield session
-        monkeypatch.setattr(scan_steps, "AsyncSessionLocal", context)
+        monkeypatch.setattr(scan_runtime, "AsyncSessionLocal", context)
         async def attack(*args, **kwargs):
             assert kwargs["result_id"] == expected_id
             saved[expected_id] = result
@@ -95,7 +96,7 @@ def test_redelivered_attempt_does_not_call_provider_or_commit_twice(monkeypatch)
         @asynccontextmanager
         async def provider(*args):
             yield agent
-        monkeypatch.setattr(scan_steps, "configured_agent", provider)
+        monkeypatch.setattr(scan_runtime, "configured_agent", provider)
         assert await scan_steps.execute_attempt.func(run_id, vector_id, "base") is True
         assert await scan_steps.execute_attempt.func(run_id, vector_id, "base") is True
         agent.run_attack_vector.assert_awaited_once()
@@ -107,9 +108,21 @@ def test_workflow_does_not_record_provider_error_bodies(monkeypatch):
     async def exercise():
         session = SimpleNamespace(get=AsyncMock(return_value=SimpleNamespace(is_active=True, user_id="owner")))
         run = SimpleNamespace(target_system_id=uuid4(), user_id="owner")
-        monkeypatch.setattr(scan_steps, "load_effective_llm_role_settings", AsyncMock(side_effect=ValueError("secret-value")))
+        monkeypatch.setattr(scan_runtime, "load_effective_llm_role_settings", AsyncMock(side_effect=ValueError("secret-value")))
         with pytest.raises(RuntimeError, match="Scan operation failed") as error:
-            async with scan_steps.configured_agent(session, run):
+            async with scan_runtime.configured_agent(session, run):
                 pass
         assert "secret-value" not in str(error.value)
     asyncio.run(exercise())
+
+
+def test_cold_workflow_import_works_in_real_vercel_sandbox():
+    import importlib
+    from vercel.workflow._internal.py_sandbox import Sandbox
+    sandbox = Sandbox()
+    with sandbox.enter():
+        module = importlib.import_module("app.workflows.scans")
+        assert module.attack_scan
+        assert "sqlalchemy" not in sandbox.table
+        assert "app.workflows.scan_runtime" not in sandbox.table
+        assert "httpx" not in sandbox.table

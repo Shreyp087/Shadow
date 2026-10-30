@@ -16,6 +16,8 @@ from .common import ORMResponseModel
 class CreateTargetSystemRequest(BaseModel):
     name: str
     description: str | None = None
+    role: str = Field(default="General Assistant", min_length=1, max_length=120)
+    system_prompt: str = Field(default="", max_length=12000)
     api_endpoint: AnyHttpUrl = Field(max_length=2048)
     target_type: TargetSystemType
     api_key: SecretStr = Field(min_length=1)
@@ -58,6 +60,8 @@ class TargetSystemResponse(ORMResponseModel):
     user_id: UUID
     name: str
     description: str | None
+    role: str = "General Assistant"
+    system_prompt: str = ""
     api_endpoint: str
     target_type: TargetSystemType
     api_key_configured: bool

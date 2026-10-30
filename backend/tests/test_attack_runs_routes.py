@@ -130,8 +130,9 @@ def test_create_attack_run_returns_pending_response_and_background_task(monkeypa
         assert len(background_tasks.tasks) == (1 if execution == "local" else 0)
         if execution == "vercel":
             assert response.meta["workflow_run_id"] == "workflow-123"
+            assert db_session.added[0].workflow_run_id == "workflow-123"
             assert dispatch.await_args.args[1] == str(response.data.id)
-        assert db_session.commit_calls == 1
+        assert db_session.commit_calls == (2 if execution == "vercel" else 1)
 
     asyncio.run(run_test())
 
@@ -368,3 +369,23 @@ def test_download_attack_run_report_returns_pdf_response(monkeypatch) -> None:
         assert str(attack_run.id) in response.headers["content-disposition"]
 
     asyncio.run(run_test())
+
+
+@pytest.mark.parametrize('worker_state', ['failed', 'cancelled', 'pending', 'running'])
+def test_failed_worker_is_reconciled_instead_of_remaining_pending(monkeypatch, worker_state):
+    from vercel import workflow
+    async def exercise():
+        monkeypatch.setenv('VERCEL', '1')
+        handle = SimpleNamespace(status=AsyncMock(return_value=worker_state))
+        monkeypatch.setattr(workflow, 'get_run', lambda identifier: handle)
+        run = AttackRun(id=uuid4(), status=AttackRunStatus.PENDING, workflow_run_id='wrun-test')
+        session = FakeSession()
+        await attack_runs_route._reconcile_workflow_status(session, run)
+        if worker_state in ('failed', 'cancelled'):
+            assert run.status == AttackRunStatus.FAILED
+            assert run.completed_at is not None and 'Start a new scan' in run.failure_reason
+            assert session.commit_calls == 1
+        else:
+            assert run.status == AttackRunStatus.PENDING
+            assert session.commit_calls == 0
+    asyncio.run(exercise())

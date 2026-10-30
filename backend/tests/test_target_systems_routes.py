@@ -123,6 +123,8 @@ def test_create_target_system_accepts_secret_and_returns_configuration_state(mon
             payload=CreateTargetSystemRequest(
                 name="Internal HR Assistant",
                 description="HR assistant",
+                role="HR Support",
+                system_prompt="You are an HR support assistant. Keep employee data private.",
                 api_endpoint="https://example.test/messages",
                 target_type=TargetSystemType.ANTHROPIC,
                 api_key="sk-live-5678",
@@ -142,6 +144,8 @@ def test_create_target_system_accepts_secret_and_returns_configuration_state(mon
         stored_target = db_session.added[0]
         assert isinstance(stored_target, TargetSystem)
         assert stored_target.api_key_encrypted == "encrypted-secret"
+        assert stored_target.role == "HR Support"
+        assert response.data.system_prompt == stored_target.system_prompt
 
     asyncio.run(run_test())
 

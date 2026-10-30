@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import asyncio
 import os
 from datetime import datetime, timezone
 from math import ceil
@@ -167,8 +168,11 @@ async def create_attack_run(
                 attack_scan, str(attack_run.id), [str(item) for item in vector_ids]
             )
             workflow_run_id = handle.run_id
+            attack_run.workflow_run_id = workflow_run_id
+            await db_session.commit()
         except Exception:
             attack_run.status = AttackRunStatus.FAILED
+            attack_run.failure_reason = "The scan worker could not be queued. Please start a new scan."
             attack_run.completed_at = datetime.now(timezone.utc)
             await db_session.commit()
             raise HTTPException(status_code=503, detail="Scan could not be queued") from None
@@ -198,6 +202,7 @@ async def get_attack_run(
 ) -> APIResponse[AttackRunResponse]:
     user = await _get_authenticated_user(db_session, clerk_user_id)
     attack_run = await _get_user_attack_run(db_session, user, run_id)
+    await _reconcile_workflow_status(db_session, attack_run)
     summary = await _build_attack_run_summary(db_session, attack_run.id)
 
     return APIResponse(
@@ -332,6 +337,8 @@ async def _execute_attack_run_background(
                 scorer_service=RiskScorer(
                     judge_client.client,
                     model_name=judge_client.model_name,
+                    target_role=target_system.role,
+                    target_system_prompt=target_system.system_prompt,
                 ),
                 trust_ledger=TrustLedger(db_session),
                 mutation_engine=MutationEngine(
@@ -360,6 +367,24 @@ async def _execute_attack_run_background(
     finally:
         if role_clients is not None:
             await role_clients.close()
+
+
+async def _reconcile_workflow_status(db_session: AsyncSession, run: AttackRun) -> None:
+    if os.getenv("VERCEL") != "1" or not run.workflow_run_id or run.status not in (
+        AttackRunStatus.PENDING, AttackRunStatus.RUNNING,
+    ):
+        return
+    try:
+        from vercel import workflow
+        state = await asyncio.wait_for(workflow.get_run(run.workflow_run_id).status(), timeout=5)
+    except Exception as exc:
+        logger.warning("Workflow status lookup failed (run_id=%s, error_type=%s)", run.id, type(exc).__name__)
+        return
+    if state in ("failed", "cancelled"):
+        run.status = AttackRunStatus.FAILED
+        run.failure_reason = "The scan worker stopped before completion. Start a new scan to retry."
+        run.completed_at = datetime.now(timezone.utc)
+        await db_session.commit()
 
 
 async def _get_authenticated_user(db_session: AsyncSession, clerk_user_id: str) -> User:

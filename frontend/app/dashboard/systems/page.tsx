@@ -10,6 +10,8 @@ import type { CreateTargetSystemRequest, TargetSystemResponse, TargetSystemType 
 const initialFormState: CreateTargetSystemRequest = {
   name: "",
   description: "",
+  role: "",
+  system_prompt: "",
   api_endpoint: "",
   target_type: "openai_compatible",
   api_key: "",
@@ -190,6 +192,24 @@ export default function SystemsPage() {
             placeholder="Describe the assistant, domain, and trust boundary."
             multiline
           />
+          <Field
+            id="system-role"
+            label="Assistant role"
+            value={form.role ?? ""}
+            onChange={(value) => updateField("role", value)}
+            placeholder="IT Support, Restaurant Help, Customer Support"
+            required
+          />
+          <Field
+            id="system-prompt"
+            label="System prompt"
+            value={form.system_prompt ?? ""}
+            onChange={(value) => updateField("system_prompt", value)}
+            placeholder="You are an IT support assistant. Help users troubleshoot safely..."
+            hint="Define the assistant’s job, available knowledge, privacy rules, and escalation boundaries. Sent as system instructions on every test."
+            multiline
+            required
+          />
           <div className="space-y-2">
             <label htmlFor="target-type" className="text-sm font-medium">
               Target type
@@ -268,10 +288,10 @@ export default function SystemsPage() {
       <section className="rounded-[1.75rem] border bg-white/85 p-6 shadow-sm">
         {systems.some((system) => system.is_starter) ? (
           <div className="mb-6 rounded-2xl border border-teal-200 bg-teal-50 p-5 text-teal-950">
-            <p className="font-medium">Start with a real model</p>
+            <p className="font-medium">Start with a live assistant</p>
             <p className="mt-2 text-sm leading-6">
-              The starter targets call live OpenAI models using the app-provided key. Choose a target and run a scan
-              to generate your own results. Your inventory and scan history stay in your workspace.
+              IT Support, Restaurant Help, and Customer Support each have their own system instructions and call live
+              OpenAI models using the app-provided key. Choose an assistant to test its role and boundaries.
             </p>
           </div>
         ) : null}
@@ -300,7 +320,7 @@ export default function SystemsPage() {
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <h3 className="font-[family-name:var(--font-heading)] text-xl font-semibold">{system.name}</h3>
-                    <p className="mt-2 text-sm text-muted-foreground">{system.model_name}</p>
+                    <p className="mt-2 text-sm text-muted-foreground">{system.role || "General Assistant"} · {system.model_name}</p>
                   </div>
                   <span
                     className={`rounded-full px-3 py-1 text-xs uppercase tracking-[0.22em] ${
@@ -329,6 +349,14 @@ export default function SystemsPage() {
                       : system.api_key_configured ? "Your encrypted API key" : "Connection required"}</dd>
                   </div>
                 </dl>
+                <details className="mt-4 rounded-2xl border bg-muted/40 p-4">
+                  <summary className="cursor-pointer text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
+                    View system prompt
+                  </summary>
+                  <p className="mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-muted-foreground">
+                    {system.system_prompt || "No system instructions are configured for this target."}
+                  </p>
+                </details>
                 <div className="mt-5 border-t pt-4">
                   <Button
                     type="button"

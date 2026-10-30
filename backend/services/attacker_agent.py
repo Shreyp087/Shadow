@@ -228,6 +228,8 @@ class AttackerAgent:
                     f"Target API endpoint: {target_system.api_endpoint}\n"
                     f"Target type: {target_system.target_type.value}\n"
                     f"Target model: {target_system.model_name}\n\n"
+                    f"Target role: {getattr(target_system, 'role', None) or 'General Assistant'}\n"
+                    f"Target system instructions: {getattr(target_system, 'system_prompt', None) or 'Not specified.'}\n\n"
                     "Produce the best replacement text for the {target_instruction} placeholder."
                 ),
             )

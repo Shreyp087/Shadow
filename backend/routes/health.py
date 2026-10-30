@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import logging
 
 from fastapi import APIRouter, Depends, status
 from fastapi.responses import JSONResponse
@@ -13,6 +14,7 @@ from app.core.deployment import missing_configuration
 API_VERSION = "1.0.0"
 
 router = APIRouter(tags=["health"])
+logger = logging.getLogger(__name__)
 
 
 @router.get("/api/status")
@@ -45,6 +47,7 @@ async def healthcheck(
     try:
         await db_session.execute(text("SELECT 1"))
         return JSONResponse(status_code=status.HTTP_200_OK, content=payload)
-    except Exception:
+    except Exception as exc:
+        logger.warning("Database readiness failed (%s)", type(exc).__name__)
         payload["db"] = "error"
         return JSONResponse(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, content=payload)

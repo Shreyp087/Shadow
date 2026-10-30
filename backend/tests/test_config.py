@@ -1,4 +1,5 @@
 from app.core.config import _normalize_database_url, get_settings
+from sqlalchemy.ext.asyncio import create_async_engine
 
 
 def test_normalize_database_url_rewrites_docker_hostname_for_local_development() -> None:
@@ -25,6 +26,16 @@ def test_normalize_database_url_adds_asyncpg_driver_to_managed_database_url() ->
     assert normalized == (
         "postgresql+asyncpg://shadowledger:secret@database.example.com:5432/shadowledger"
     )
+
+
+def test_managed_postgres_keeps_tls_and_channel_binding_parameters():
+    original = "postgresql://test:test@database.test/app?sslmode=require&channel_binding=require"
+    normalized = _normalize_database_url(original, "production")
+    engine = create_async_engine(normalized)
+    _args, kwargs = engine.dialect.create_connect_args(engine.url)
+    assert engine.dialect.driver == "psycopg"
+    assert kwargs["sslmode"] == "require"
+    assert kwargs["channel_binding"] == "require"
 
 
 def test_settings_default_to_debug_disabled(monkeypatch) -> None:

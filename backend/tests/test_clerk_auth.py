@@ -12,6 +12,7 @@ from fastapi.security import HTTPAuthorizationCredentials
 
 from app.core.config import get_settings
 from auth.clerk import DEMO_CLERK_USER_ID, verify_clerk_token
+from auth.clerk import _validate_authorized_party
 
 
 @pytest.fixture(autouse=True)
@@ -123,3 +124,28 @@ def _generate_rsa_keypair() -> tuple[str, str]:
         format=serialization.PublicFormat.SubjectPublicKeyInfo,
     ).decode("utf-8")
     return private_pem, public_pem
+
+
+@pytest.mark.parametrize("origin", [
+    "https://shadowledger-iota.vercel.app",
+    "https://shadowledger-iota.vercel.app/",
+    "https://shadowledger-iota.vercel.app:443",
+])
+def test_production_origin_allows_equivalent_origin_spelling(monkeypatch, origin):
+    monkeypatch.setenv("CLERK_AUTHORIZED_PARTIES", " https://shadowledger-iota.vercel.app/ ")
+    _validate_authorized_party({"azp": origin})
+
+
+@pytest.mark.parametrize("origin", [
+    "https://untrusted.test",
+    "https://shadowledger-iota.vercel.app.untrusted.test",
+    "https://shadowledger-iota.vercel.app:444",
+    "https://shadowledger-iota.vercel.app/other",
+    "https://shadowledger-iota.vercel.app:bad-port",
+    "https://user@shadowledger-iota.vercel.app",
+])
+def test_production_origin_keeps_other_parties_rejected(monkeypatch, origin):
+    monkeypatch.setenv("CLERK_AUTHORIZED_PARTIES", "https://shadowledger-iota.vercel.app/")
+    with pytest.raises(HTTPException) as error:
+        _validate_authorized_party({"azp": origin})
+    assert error.value.status_code == 401

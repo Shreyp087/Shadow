@@ -59,6 +59,13 @@ def _normalize_database_url(database_url: str, environment: str) -> str:
     if parsed_url.drivername in {"postgres", "postgresql"}:
         parsed_url = parsed_url.set(drivername="postgresql+asyncpg")
 
+    if parsed_url.drivername == "postgresql+asyncpg" and (
+        "sslmode" in parsed_url.query or "channel_binding" in parsed_url.query
+    ):
+        # Managed Postgres URLs use libpq parameters. Psycopg preserves both TLS
+        # and channel binding instead of dropping these protections for asyncpg.
+        parsed_url = parsed_url.set(drivername="postgresql+psycopg")
+
     if (
         environment.lower() != "production"
         and not _running_in_docker()

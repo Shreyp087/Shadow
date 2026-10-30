@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 from typing import Any
+from urllib.parse import urlsplit
 
 import jwt
 from fastapi import Depends, HTTPException, status
@@ -92,7 +93,8 @@ def _validate_authorized_party(payload: dict[str, Any]) -> None:
     azp = payload.get("azp")
     allowed_parties = _authorized_parties()
 
-    if azp and allowed_parties and azp not in allowed_parties:
+    normalized_azp = _normalized_origin(azp) if azp else ""
+    if azp and allowed_parties and (not normalized_azp or normalized_azp not in allowed_parties):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid Clerk authorized party",
@@ -102,10 +104,37 @@ def _validate_authorized_party(payload: dict[str, Any]) -> None:
 def _authorized_parties() -> list[str]:
     configured = _configured_env_value("CLERK_AUTHORIZED_PARTIES")
     if configured:
-        return [item.strip() for item in configured.split(",") if item.strip()]
+        return [_normalized_origin(item) for item in configured.split(",") if item.strip()]
 
     frontend_origin = get_settings().frontend_origin
-    return [frontend_origin] if frontend_origin else []
+    return [_normalized_origin(frontend_origin)] if frontend_origin else []
+
+
+def _normalized_origin(value: str) -> str:
+    if not isinstance(value, str):
+        return ""
+    value = value.strip()
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError:
+        return ""
+    # Normalize only origin spelling; never accept a wildcard, path, or userinfo.
+    if (
+        parsed.scheme in {"http", "https"}
+        and parsed.hostname
+        and parsed.username is None
+        and parsed.password is None
+        and parsed.path in {"", "/"}
+        and not parsed.query
+        and not parsed.fragment
+    ):
+        host = parsed.hostname.lower()
+        if ":" in host:
+            host = f"[{host}]"
+        suffix = f":{port}" if port and port != (443 if parsed.scheme == "https" else 80) else ""
+        return f"{parsed.scheme}://{host}{suffix}"
+    return ""
 
 
 def _resolve_jwks_url() -> str:

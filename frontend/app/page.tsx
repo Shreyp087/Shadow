@@ -49,7 +49,11 @@ export default function HomePage() {
               </p>
             </div>
             <div className="flex flex-col gap-3 sm:flex-row">
-              {mode === "demo" ? (
+              {mode === "unavailable" ? (
+                <Button disabled size="lg" aria-describedby="workspace-availability">
+                  Get Started
+                </Button>
+              ) : mode === "demo" ? (
                 <Button asChild size="lg" className="gap-2">
                   <Link href="/dashboard" prefetch={false}>
                     Get Started
@@ -76,12 +80,23 @@ export default function HomePage() {
                   </SignedIn>
                 </>
               )}
-              <Button asChild size="lg" variant="outline">
-                <Link href="/dashboard/systems" prefetch={false}>
+              {mode === "unavailable" ? (
+                <Button disabled size="lg" variant="outline" aria-describedby="workspace-availability">
                   Open Workspace
-                </Link>
-              </Button>
+                </Button>
+              ) : (
+                <Button asChild size="lg" variant="outline">
+                  <Link href="/dashboard/systems" prefetch={false}>
+                    Open Workspace
+                  </Link>
+                </Button>
+              )}
             </div>
+            {mode === "unavailable" ? (
+              <p id="workspace-availability" className="text-sm text-muted-foreground">
+                Workspace access will be available soon.
+              </p>
+            ) : null}
           </div>
 
           <div className="rounded-[2rem] border bg-white/85 p-6 shadow-[0_30px_90px_rgba(15,23,42,0.10)] backdrop-blur">

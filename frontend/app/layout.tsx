@@ -27,10 +27,14 @@ export default function RootLayout({
 }: Readonly<{
   children: ReactNode;
 }>) {
+  const clerkConfigured = Boolean(
+    process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY && process.env.CLERK_SECRET_KEY
+  );
+
   return (
     <html lang="en" className={`${headingFont.variable} ${bodyFont.variable}`}>
       <body className="font-[family-name:var(--font-body)]">
-        <AppAuthProvider>{children}</AppAuthProvider>
+        <AppAuthProvider clerkConfigured={clerkConfigured}>{children}</AppAuthProvider>
       </body>
     </html>
   );

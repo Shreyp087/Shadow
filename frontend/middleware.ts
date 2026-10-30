@@ -16,6 +16,12 @@ export default function middleware(request: NextRequest, event: NextFetchEvent) 
     return NextResponse.next();
   }
 
+  if (!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || !process.env.CLERK_SECRET_KEY) {
+    return isProtectedRoute(request)
+      ? NextResponse.redirect(new URL("/", request.url))
+      : NextResponse.next();
+  }
+
   return authenticatedMiddleware(request, event);
 }
 

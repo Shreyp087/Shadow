@@ -8,17 +8,22 @@ import { isLocalDemoAuthEnabled } from "@/lib/auth-mode";
 type TokenGetter = ReturnType<typeof useAuth>["getToken"];
 
 type AppAuthValue = {
-  mode: "demo" | "clerk";
+  mode: "demo" | "clerk" | "unavailable";
   getToken: TokenGetter;
 };
 
 const AppAuthContext = createContext<AppAuthValue | null>(null);
 const demoGetToken: TokenGetter = async () => null;
 const demoAuthValue: AppAuthValue = { mode: "demo", getToken: demoGetToken };
+const unavailableAuthValue: AppAuthValue = { mode: "unavailable", getToken: demoGetToken };
 
-export function AppAuthProvider({ children }: PropsWithChildren) {
+export function AppAuthProvider({ children, clerkConfigured }: PropsWithChildren<{ clerkConfigured: boolean }>) {
   if (isLocalDemoAuthEnabled()) {
     return <AppAuthContext.Provider value={demoAuthValue}>{children}</AppAuthContext.Provider>;
+  }
+
+  if (!clerkConfigured) {
+    return <AppAuthContext.Provider value={unavailableAuthValue}>{children}</AppAuthContext.Provider>;
   }
 
   return (

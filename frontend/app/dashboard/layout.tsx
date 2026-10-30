@@ -98,9 +98,9 @@ export default function DashboardLayout({
               <span className="rounded-full bg-secondary px-3 py-2 text-xs font-medium text-secondary-foreground">
                 Local demo
               </span>
-            ) : (
+            ) : mode === "clerk" ? (
               <UserButton afterSignOutUrl="/" />
-            )}
+            ) : null}
           </header>
 
           <main className="min-w-0 p-6 lg:p-8">{children}</main>

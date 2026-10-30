@@ -434,6 +434,7 @@ The GitHub Actions workflow in `.github/workflows/ci.yml` runs on pushes to `mai
 - Configure `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, `NEXT_PUBLIC_API_URL`, and `RAILWAY_BACKEND_URL` in the Vercel project's environment variables for each deployed environment. Use a hosted HTTPS backend URL; `localhost` refers to the deployed server or the visitor's machine, not your development backend.
 - Set `NEXT_PUBLIC_DEMO_AUTH=false`; production always requires Clerk authentication. Use the publishable and secret keys from the same Clerk application.
 - For a CLI deployment, run `npx vercel login`, then run `npx vercel link` and `npx vercel --prod` from `frontend/`.
+- The public landing page can deploy before Clerk is configured; workspace access stays closed. After adding both Clerk keys, redeploy to enable sign-in.
 
 ### Backend on Railway
 

@@ -9,6 +9,11 @@ from models.enums import LLMProvider, LLMRole
 from utils.network_security import parse_ip_literal
 
 OPENAI_API_BASE_URL = "https://api.openai.com/v1"
+ANTHROPIC_API_BASE_URL = "https://api.anthropic.com"
+HOSTED_API_BASE_URLS = {
+    LLMProvider.HOSTED_OPENAI: OPENAI_API_BASE_URL,
+    LLMProvider.HOSTED_ANTHROPIC: ANTHROPIC_API_BASE_URL,
+}
 
 
 class UpdateLLMRoleSettingRequest(BaseModel):
@@ -42,10 +47,11 @@ class UpdateLLMRoleSettingRequest(BaseModel):
         provider = info.data.get("provider")
         if not isinstance(provider, LLMProvider):
             return base_url
-        if provider is LLMProvider.HOSTED_OPENAI:
-            if base_url is not None and canonicalize_llm_base_url(base_url) != OPENAI_API_BASE_URL:
+        if provider in HOSTED_API_BASE_URLS:
+            official_url = HOSTED_API_BASE_URLS[provider]
+            if base_url is not None and canonicalize_llm_base_url(base_url) != official_url:
                 raise ValueError(
-                    f"Hosted OpenAI uses the fixed base URL {OPENAI_API_BASE_URL}"
+                    f"Hosted provider uses the fixed base URL {official_url}"
                 )
             return base_url
 

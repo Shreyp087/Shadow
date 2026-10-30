@@ -11,6 +11,7 @@
       "root": "backend/",
       "framework": "fastapi",
       "entrypoint": "pyproject.toml",
+      "buildCommand": "python scripts/prepare_deployment.py",
       "functions": {
         "main.py": { "maxDuration": 300 }
       }

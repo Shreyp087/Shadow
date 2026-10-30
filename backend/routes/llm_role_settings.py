@@ -19,10 +19,12 @@ from schemas.llm_role_setting import (
     LLMConnectionTestResponse,
     LLMRoleSettingResponse,
     OPENAI_API_BASE_URL,
+    HOSTED_API_BASE_URLS,
     UpdateLLMRoleSettingRequest,
     canonicalize_llm_base_url,
 )
 from services.llm_role_settings import (
+    HOSTED_KEY_ENV,
     LLMSettingsConfigurationError,
     load_stored_llm_role_settings,
     resolve_effective_llm_role_setting,
@@ -75,11 +77,7 @@ async def update_llm_role_setting(
                 detail="API credential encryption is unavailable",
             ) from exc
 
-    base_url = (
-        OPENAI_API_BASE_URL
-        if payload.provider is LLMProvider.HOSTED_OPENAI
-        else canonicalize_llm_base_url(payload.base_url)
-    )
+    base_url = HOSTED_API_BASE_URLS.get(payload.provider) or canonicalize_llm_base_url(payload.base_url)
 
     if setting is None:
         setting = LLMRoleSetting(
@@ -105,14 +103,14 @@ async def update_llm_role_setting(
             setting.api_key_provider = payload.provider
 
     if (
-        payload.provider is LLMProvider.HOSTED_OPENAI
+        payload.provider in HOSTED_KEY_ENV
         and not resolve_public_llm_role_setting(role, setting).api_key_configured
     ):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
-                "A hosted OpenAI API key is required. Enter one for this role "
-                "or configure the server-side OPENAI_API_KEY fallback."
+                "A hosted provider API key is required. Enter one for this role "
+                f"or configure the server-side {HOSTED_KEY_ENV[payload.provider]} fallback."
             ),
         )
 
@@ -181,28 +179,39 @@ async def _probe_chat_completion(
             follow_redirects=False,
             trust_env=False,
         ) as client:
-            response = await client.post(
-                f"{base_url.rstrip('/')}/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}"},
-                json={
-                    "model": model_name,
-                    "messages": [
-                        {
-                            "role": "system",
-                            "content": "Respond with a short plain-text acknowledgement.",
-                        },
-                        {"role": "user", "content": "Reply with OK."},
-                    ],
-                    "max_tokens": 32,
-                    "temperature": 0,
-                },
-            )
+            if provider is LLMProvider.HOSTED_ANTHROPIC:
+                response = await client.post(
+                    f"{base_url.rstrip('/')}/v1/messages",
+                    headers={"x-api-key": api_key, "anthropic-version": "2023-06-01"},
+                    json={"model": model_name, "max_tokens": 32,
+                          "messages": [{"role": "user", "content": "Reply with OK."}]},
+                )
+            else:
+                response = await client.post(
+                    f"{base_url.rstrip('/')}/chat/completions",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    json={
+                        "model": model_name,
+                        "messages": [
+                            {"role": "system", "content": "Respond with a short plain-text acknowledgement."},
+                            {"role": "user", "content": "Reply with OK."},
+                        ],
+                        "max_tokens": 32,
+                        "temperature": 0,
+                    },
+                )
             response.raise_for_status()
             payload = response.json()
     except httpx.HTTPStatusError as exc:
         return False, f"Provider returned HTTP {exc.response.status_code}"
     except (httpx.HTTPError, ValueError):
         return False, "Provider connection or response validation failed"
+
+    if provider is LLMProvider.HOSTED_ANTHROPIC:
+        blocks = payload.get("content", []) if isinstance(payload, dict) else []
+        if any(isinstance(block, dict) and block.get("type") == "text" and str(block.get("text", "")).strip() for block in blocks):
+            return True, "Claude Messages request succeeded with the configured model"
+        return False, "Provider responded, but the configured model returned no text"
 
     choices = payload.get("choices") if isinstance(payload, dict) else None
     first_choice = choices[0] if isinstance(choices, list) and choices else None

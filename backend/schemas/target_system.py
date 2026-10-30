@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from uuid import UUID
+from typing import Literal
 
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, SecretStr, field_validator
 
@@ -60,6 +61,8 @@ class TargetSystemResponse(ORMResponseModel):
     api_endpoint: str
     target_type: TargetSystemType
     api_key_configured: bool
+    credential_source: Literal["personal", "app", "none"] = "personal"
+    is_starter: bool = False
     model_name: str
     created_at: datetime
     is_active: bool

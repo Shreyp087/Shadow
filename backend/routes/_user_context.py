@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import IntegrityError
 
 from auth.clerk import DEMO_CLERK_USER_ID, demo_auth_enabled
 from models.user import User
@@ -28,8 +29,17 @@ async def _get_or_create_user(db_session: AsyncSession, clerk_user_id: str) -> U
         clerk_user_id=clerk_user_id,
         email=f"{clerk_user_id}@shadowledger.local",
     )
-    db_session.add(user)
-    await db_session.flush()
+    try:
+        async with db_session.begin_nested():
+            db_session.add(user)
+            await db_session.flush()
+        # A first authenticated GET must persist its identity for parallel
+        # dashboard requests and per-user starter provisioning.
+        await db_session.commit()
+    except IntegrityError:
+        user = await db_session.scalar(statement)
+        if user is None:
+            raise
     return user
 
 

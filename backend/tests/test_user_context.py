@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from uuid import uuid4
 
 import pytest
@@ -18,6 +19,7 @@ class FakeSession:
         self.scalar_calls = 0
         self.added: list[User] = []
         self.flush_calls = 0
+        self.commit_calls = 0
 
     async def scalar(self, _statement) -> User | None:
         self.scalar_calls += 1
@@ -29,6 +31,13 @@ class FakeSession:
 
     async def flush(self) -> None:
         self.flush_calls += 1
+
+    @asynccontextmanager
+    async def begin_nested(self):
+        yield
+
+    async def commit(self):
+        self.commit_calls += 1
 
 
 @pytest.fixture(autouse=True)
@@ -57,6 +66,7 @@ def test_first_clerk_read_creates_isolated_user_without_demo_fallback() -> None:
         assert resolved is not demo_user
         assert session.added == [resolved]
         assert session.flush_calls == 1
+        assert session.commit_calls == 1
         assert session.scalar_calls == 1
 
     asyncio.run(run_test())

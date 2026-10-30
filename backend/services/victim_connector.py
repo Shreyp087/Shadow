@@ -15,6 +15,7 @@ from models.enums import TargetSystemType
 from models.target_system import TargetSystem
 from utils.encryption import decrypt_value
 from utils.network_security import parse_ip_literal, require_global_ip_address
+from services.starter_targets import shared_target_key
 
 
 @dataclass(slots=True)
@@ -47,7 +48,12 @@ class VictimConnector:
                 raise ValueError("Target system is inactive")
 
             await self._validate_endpoint_destination()
-            api_key = decrypt_value(self.target_system.api_key_encrypted)
+            if self.target_system.api_key_encrypted:
+                api_key = decrypt_value(self.target_system.api_key_encrypted)
+            else:
+                api_key = shared_target_key(self.target_system)
+                if not api_key:
+                    raise ValueError("No API credential is configured for this target")
 
             if self.target_system.target_type == TargetSystemType.OPENAI_COMPATIBLE:
                 response_text, tokens_used = await self._send_openai_compatible(prompt, api_key)

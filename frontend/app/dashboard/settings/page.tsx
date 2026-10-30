@@ -43,7 +43,7 @@ const roleDetails = {
     description: "Rewrites high-risk prompts into fresh follow-up attempts."
   },
   judge: {
-    label: "Judge",
+    label: "Scorer / Judge",
     icon: ShieldCheck,
     description: "Scores target responses and records the reason for each risk decision."
   }
@@ -55,6 +55,12 @@ const providerDetails = {
     shortLabel: "Hosted",
     icon: Cloud,
     description: "OpenAI's fixed API endpoint with an environment or encrypted saved key."
+  },
+  hosted_anthropic: {
+    label: "Anthropic Claude",
+    shortLabel: "Claude",
+    icon: BrainCircuit,
+    description: "Claude through Anthropic's official API, using an app or saved Anthropic key."
   },
   local_openai_compatible: {
     label: "Local / LM Studio",
@@ -200,6 +206,10 @@ export default function SettingsPage() {
     const current = drafts[role];
     updateDraft(role, {
       provider,
+      api_key: "",
+      model_name: provider === "hosted_anthropic"
+        ? "claude-sonnet-4-6"
+        : current.provider === "hosted_anthropic" ? "gpt-4o-mini" : current.model_name,
       base_url:
         provider === "local_openai_compatible"
           ? current.base_url || localDefaultBaseUrl
@@ -406,14 +416,14 @@ function RoleSettingsCard({
   const dirty = isDraftDirty(draft, saved);
   const providerChanged = Boolean(saved && saved.provider !== draft.provider);
   const needsHostedKey =
-    draft.provider === "hosted_openai" &&
-    saved?.provider === "hosted_openai" &&
+    draft.provider !== "local_openai_compatible" &&
+    saved?.provider === draft.provider &&
     !saved.api_key_configured &&
     !draft.api_key.trim();
   const valid =
     Boolean(draft.model_name.trim()) &&
     !needsHostedKey &&
-    (draft.provider === "hosted_openai" || Boolean(draft.base_url.trim()));
+    (draft.provider !== "local_openai_compatible" || Boolean(draft.base_url.trim()));
   const canTest = Boolean(saved) && !dirty && pending === null;
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -490,12 +500,14 @@ function RoleSettingsCard({
             placeholder={
               draft.provider === "local_openai_compatible"
                 ? "mistralai/ministral-3-14b-reasoning"
-                : "gpt-4o-mini"
+                : draft.provider === "hosted_anthropic" ? "claude-sonnet-4-6" : "gpt-4o-mini"
             }
             hint={
               draft.provider === "local_openai_compatible"
                 ? "Use the exact id returned by LM Studio at GET /v1/models."
-                : "Use an exact chat model ID enabled for the OpenAI project."
+                : draft.provider === "hosted_anthropic"
+                  ? "Use a Claude model ID enabled for your Anthropic account, such as claude-sonnet-4-6."
+                  : "Use an exact chat model ID enabled for the OpenAI project."
             }
             required
           />
@@ -514,7 +526,14 @@ function RoleSettingsCard({
           ) : (
             <div className="rounded-2xl border bg-muted/50 px-4 py-3">
               <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Hosted endpoint</p>
-              <p className="mt-2 break-all text-sm">https://api.openai.com/v1</p>
+              <p className="mt-2 break-all text-sm">
+                {draft.provider === "hosted_anthropic" ? "https://api.anthropic.com" : "https://api.openai.com/v1"}
+              </p>
+              {draft.provider === "hosted_anthropic" ? (
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  Uses the app's ANTHROPIC_API_KEY when configured, or an Anthropic key saved for this role.
+                </p>
+              ) : null}
             </div>
           )}
 

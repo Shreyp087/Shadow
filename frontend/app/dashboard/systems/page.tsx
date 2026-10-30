@@ -166,12 +166,11 @@ export default function SystemsPage() {
       <section className="rounded-[1.75rem] border bg-white/85 p-6 shadow-sm">
         <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Target system contract</p>
         <h2 className="mt-3 font-[family-name:var(--font-heading)] text-3xl font-semibold">
-          Register the AI systems you want ShadowLedger to probe
+          Connect your own AI system
         </h2>
         <p className="mt-3 text-sm leading-7 text-muted-foreground">
-          Target reads, registration, and scan launches use the authenticated API client, including your Clerk bearer
-          token whenever Clerk authentication is enabled. The backend encrypts the credential and only reports whether
-          one is configured; it never returns the key or a recognizable suffix.
+          Start with a live model in the inventory, or connect an assistant you own. Your provider key is stored
+          securely and stays private to your workspace.
         </p>
 
         <form onSubmit={handleSubmit} className="mt-6 space-y-4">
@@ -267,6 +266,15 @@ export default function SystemsPage() {
       </section>
 
       <section className="rounded-[1.75rem] border bg-white/85 p-6 shadow-sm">
+        {systems.some((system) => system.is_starter) ? (
+          <div className="mb-6 rounded-2xl border border-teal-200 bg-teal-50 p-5 text-teal-950">
+            <p className="font-medium">Start with a real model</p>
+            <p className="mt-2 text-sm leading-6">
+              The starter targets call live OpenAI models using the app-provided key. Choose a target and run a scan
+              to generate your own results. Your inventory and scan history stay in your workspace.
+            </p>
+          </div>
+        ) : null}
         <div className="flex items-center justify-between gap-4">
           <div>
             <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Registered systems</p>
@@ -296,10 +304,10 @@ export default function SystemsPage() {
                   </div>
                   <span
                     className={`rounded-full px-3 py-1 text-xs uppercase tracking-[0.22em] ${
-                      system.is_active ? "bg-teal-100 text-teal-900" : "bg-slate-200 text-slate-700"
+                      system.is_active && system.api_key_configured ? "bg-teal-100 text-teal-900" : "bg-slate-200 text-slate-700"
                     }`}
                   >
-                    {system.is_active ? "active" : "inactive"}
+                    {system.is_active ? system.api_key_configured ? "ready" : "needs key" : "inactive"}
                   </span>
                 </div>
                 <p className="mt-4 text-sm leading-7 text-muted-foreground">
@@ -316,7 +324,9 @@ export default function SystemsPage() {
                   </div>
                   <div>
                     <dt className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Credential</dt>
-                    <dd className="mt-1">{system.api_key_configured ? "Configured and encrypted" : "Not configured"}</dd>
+                    <dd className="mt-1">{system.credential_source === "app"
+                      ? "Provided by ShadowLedger"
+                      : system.api_key_configured ? "Your encrypted API key" : "Connection required"}</dd>
                   </div>
                 </dl>
                 <div className="mt-5 border-t pt-4">
@@ -324,8 +334,8 @@ export default function SystemsPage() {
                     type="button"
                     className="w-full"
                     onClick={() => void handleRunScan(system)}
-                    disabled={!system.is_active || runningSystemId !== null}
-                    title={system.is_active ? undefined : "Activate this target before starting a scan."}
+                    disabled={!system.is_active || !system.api_key_configured || runningSystemId !== null}
+                    title={!system.api_key_configured ? "Configure a provider key before starting a scan." : system.is_active ? undefined : "Activate this target before starting a scan."}
                   >
                     {runningSystemId === system.id ? "Starting scan..." : "Run Full Scan"}
                   </Button>

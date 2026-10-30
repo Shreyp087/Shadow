@@ -35,6 +35,7 @@ from services.report_generator import ReportGenerator
 from services.risk_scorer import RiskScorer
 from services.trust_ledger import TrustLedger
 from services.victim_connector import VictimConnector
+from services.starter_targets import target_credential_source
 
 from app.db.session import get_db_session
 from models.base import AsyncSessionLocal
@@ -126,6 +127,8 @@ async def create_attack_run(
 ) -> APIResponse[AttackRunResponse]:
     user = await _get_authenticated_user(db_session, clerk_user_id)
     target_system = await _get_user_target_system(db_session, user, payload.target_system_id)
+    if target_credential_source(target_system) == "none":
+        raise HTTPException(status_code=409, detail="A provider credential is required for this target")
     vector_ids = await _resolve_vector_ids(db_session, payload.vector_category_filter)
 
     if not vector_ids:

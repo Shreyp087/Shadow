@@ -23,6 +23,7 @@ class LLMRole(str, Enum):
 
 class LLMProvider(str, Enum):
     HOSTED_OPENAI = "hosted_openai"
+    HOSTED_ANTHROPIC = "hosted_anthropic"
     LOCAL_OPENAI_COMPATIBLE = "local_openai_compatible"
 
 

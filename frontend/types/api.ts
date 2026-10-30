@@ -14,7 +14,7 @@ export type SeverityLevel = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 export type RiskCategory = "SAFE" | "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 export type AttackSurfaceTrend = "IMPROVING" | "WORSENING" | "STABLE";
 export type LLMRole = "attacker" | "mutator" | "judge";
-export type LLMProvider = "hosted_openai" | "local_openai_compatible";
+export type LLMProvider = "hosted_openai" | "hosted_anthropic" | "local_openai_compatible";
 
 export type JsonValue =
   | string
@@ -63,6 +63,8 @@ export interface TargetSystemResponse {
   api_endpoint: string;
   target_type: TargetSystemType;
   api_key_configured: boolean;
+  credential_source?: "personal" | "app" | "none";
+  is_starter?: boolean;
   model_name: string;
   created_at: ISODateTimeString;
   is_active: boolean;

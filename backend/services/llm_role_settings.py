@@ -12,12 +12,17 @@ from models.enums import LLMProvider, LLMRole
 from models.llm_role_setting import LLMRoleSetting
 from schemas.llm_role_setting import (
     OPENAI_API_BASE_URL,
+    HOSTED_API_BASE_URLS,
     UpdateLLMRoleSettingRequest,
     canonicalize_llm_base_url,
 )
 from utils.encryption import decrypt_value
 
 LOCAL_AUTH_PLACEHOLDER = "lm-studio"
+HOSTED_KEY_ENV = {
+    LLMProvider.HOSTED_OPENAI: "OPENAI_API_KEY",
+    LLMProvider.HOSTED_ANTHROPIC: "ANTHROPIC_API_KEY",
+}
 
 _DEFAULT_MODEL_ENV = {
     LLMRole.ATTACKER: "OPENAI_ATTACKER_MODEL",
@@ -123,11 +128,7 @@ def _default_model(role: LLMRole) -> str:
 
 
 def _validated_base_url(setting: LLMRoleSetting) -> str:
-    raw_base_url = (
-        OPENAI_API_BASE_URL
-        if setting.provider is LLMProvider.HOSTED_OPENAI
-        else setting.base_url
-    )
+    raw_base_url = HOSTED_API_BASE_URLS.get(setting.provider, setting.base_url)
     if not raw_base_url:
         raise LLMSettingsConfigurationError(
             f"The {setting.role.value} role is missing its local provider base URL"
@@ -144,11 +145,7 @@ def _validated_base_url(setting: LLMRoleSetting) -> str:
             f"The stored {setting.role.value} role configuration is invalid"
         ) from exc
 
-    return (
-        OPENAI_API_BASE_URL
-        if setting.provider is LLMProvider.HOSTED_OPENAI
-        else canonicalize_llm_base_url(validated.base_url)
-    )
+    return HOSTED_API_BASE_URLS.get(setting.provider) or canonicalize_llm_base_url(validated.base_url)
 
 
 def _has_effective_configured_key(setting: LLMRoleSetting) -> bool:
@@ -156,8 +153,8 @@ def _has_effective_configured_key(setting: LLMRoleSetting) -> bool:
     has_matching_stored_key = bool(setting.api_key_encrypted) and credential_provider is setting.provider
     if has_matching_stored_key:
         return True
-    if setting.provider is LLMProvider.HOSTED_OPENAI:
-        return bool(os.getenv("OPENAI_API_KEY", "").strip())
+    if setting.provider in HOSTED_KEY_ENV:
+        return bool(os.getenv(HOSTED_KEY_ENV[setting.provider], "").strip())
     return False
 
 
@@ -179,10 +176,11 @@ def _resolve_api_key(
     if provider is LLMProvider.LOCAL_OPENAI_COMPATIBLE:
         return LOCAL_AUTH_PLACEHOLDER
 
-    environment_key = os.getenv("OPENAI_API_KEY", "").strip()
+    environment_key = os.getenv(HOSTED_KEY_ENV[provider], "").strip()
     if environment_key:
         return environment_key
 
     raise LLMSettingsConfigurationError(
-        f"No API key is configured for the {role.value} hosted OpenAI role"
+        f"No API key is configured for the {role.value} hosted "
+        f"{'Anthropic' if provider is LLMProvider.HOSTED_ANTHROPIC else 'OpenAI'} role"
     )

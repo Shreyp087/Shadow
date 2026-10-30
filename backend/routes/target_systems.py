@@ -14,6 +14,7 @@ from routes._user_context import resolve_mutating_user, resolve_request_user
 from schemas.common import APIResponse
 from schemas.target_system import CreateTargetSystemRequest, TargetSystemResponse
 from utils.encryption import encrypt_value
+from services.starter_targets import ensure_starter_targets, starter_spec, target_credential_source
 
 router = APIRouter(prefix="/api/v1/target-systems", tags=["target-systems"])
 
@@ -27,6 +28,7 @@ async def list_target_systems(
     clerk_user_id: ClerkUserId,
 ) -> APIResponse[list[TargetSystemResponse]]:
     user = await _get_authenticated_user(db_session, clerk_user_id)
+    await ensure_starter_targets(db_session, user.id)
     statement = (
         select(TargetSystem)
         .where(TargetSystem.user_id == user.id)
@@ -93,7 +95,9 @@ def _serialize_target_system(target_system: TargetSystem) -> TargetSystemRespons
         description=target_system.description,
         api_endpoint=target_system.api_endpoint,
         target_type=target_system.target_type,
-        api_key_configured=bool(target_system.api_key_encrypted),
+        api_key_configured=target_credential_source(target_system) != "none",
+        credential_source=target_credential_source(target_system),
+        is_starter=starter_spec(target_system) is not None,
         model_name=target_system.model_name,
         created_at=target_system.created_at,
         is_active=target_system.is_active,

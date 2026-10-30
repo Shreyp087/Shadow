@@ -7,8 +7,12 @@ from typing import Any, Callable, Mapping, Protocol
 from urllib.parse import urlsplit, urlunsplit
 
 from openai import AsyncOpenAI, DefaultAsyncHttpxClient
+from anthropic import AsyncAnthropic
+import httpx
 
 HOSTED_OPENAI_PROVIDER = "hosted_openai"
+HOSTED_ANTHROPIC_PROVIDER = "hosted_anthropic"
+HOSTED_ANTHROPIC_BASE_URL = "https://api.anthropic.com"
 LOCAL_OPENAI_COMPATIBLE_PROVIDER = "local_openai_compatible"
 HOSTED_OPENAI_BASE_URL = "https://api.openai.com/v1"
 REQUIRED_LLM_ROLES = ("attacker", "mutator", "judge")
@@ -94,11 +98,12 @@ async def create_role_llm_clients(
     *,
     options: LLMClientFactoryOptions | None = None,
     client_factory: Callable[..., Any] | None = None,
+    anthropic_client_factory: Callable[..., Any] | None = None,
 ) -> RoleLLMClients:
-    """Build three separately configured OpenAI-compatible clients.
+    """Build three independently configured OpenAI, Anthropic, or local clients.
 
     Mapping keys and setting roles may be strings or enum values. Hosted OpenAI
-    always uses the fixed official API base, while local clients are restricted
+    and Anthropic use their fixed official API bases, while local clients are restricted
     to loopback URLs so a stored hosted credential cannot be redirected.
     """
 
@@ -126,6 +131,7 @@ async def create_role_llm_clients(
                 setting,
                 options=factory_options,
                 client_factory=resolved_client_factory,
+                anthropic_client_factory=anthropic_client_factory or _create_secure_anthropic_client,
             )
     except Exception:
         try:
@@ -144,6 +150,7 @@ def _create_role_client(
     *,
     options: LLMClientFactoryOptions,
     client_factory: Callable[..., Any],
+    anthropic_client_factory: Callable[..., Any],
 ) -> ConfiguredRoleClient:
     provider = _enum_value(setting.provider).lower()
     model_name = str(setting.model_name).strip()
@@ -163,6 +170,16 @@ def _create_role_client(
         api_key = raw_api_key
         base_url = HOSTED_OPENAI_BASE_URL
         timeout = options.hosted_timeout_seconds
+    elif provider == HOSTED_ANTHROPIC_PROVIDER:
+        if not raw_api_key:
+            raise LLMClientConfigurationError(f"Hosted Anthropic API key is required for role '{role}'")
+        configured_base_url = str(getattr(setting, "base_url", None) or "").rstrip("/")
+        if configured_base_url and configured_base_url != HOSTED_ANTHROPIC_BASE_URL:
+            raise LLMClientConfigurationError("Hosted Anthropic cannot override the official API base URL")
+        api_key = raw_api_key
+        base_url = HOSTED_ANTHROPIC_BASE_URL
+        timeout = options.hosted_timeout_seconds
+        client_factory = anthropic_client_factory
     elif provider == LOCAL_OPENAI_COMPATIBLE_PROVIDER:
         base_url = _normalize_loopback_base_url(getattr(setting, "base_url", None), role)
         # AsyncOpenAI requires a non-empty key even when LM Studio authentication
@@ -197,6 +214,12 @@ def _create_secure_openai_client(**kwargs: Any) -> AsyncOpenAI:
         trust_env=False,
     )
     return AsyncOpenAI(**kwargs, http_client=http_client)
+
+
+def _create_secure_anthropic_client(**kwargs: Any) -> AsyncAnthropic:
+    return AsyncAnthropic(**kwargs, http_client=httpx.AsyncClient(
+        timeout=kwargs.get("timeout"), follow_redirects=False, trust_env=False,
+    ))
 
 
 def _normalize_loopback_base_url(base_url: str | None, role: str) -> str:

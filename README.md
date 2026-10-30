@@ -431,6 +431,9 @@ The GitHub Actions workflow in `.github/workflows/ci.yml` runs on pushes to `mai
 - Vercel config lives in `frontend/vercel.json`.
 - API proxy rewrites are resolved in `frontend/next.config.mjs` using `RAILWAY_BACKEND_URL` or `NEXT_PUBLIC_API_URL`.
 - Set the Vercel project root to `frontend/`.
+- Configure `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, `NEXT_PUBLIC_API_URL`, and `RAILWAY_BACKEND_URL` in the Vercel project's environment variables for each deployed environment. Use a hosted HTTPS backend URL; `localhost` refers to the deployed server or the visitor's machine, not your development backend.
+- Set `NEXT_PUBLIC_DEMO_AUTH=false`; production always requires Clerk authentication. Use the publishable and secret keys from the same Clerk application.
+- For a CLI deployment, run `npx vercel login`, then run `npx vercel link` and `npx vercel --prod` from `frontend/`.
 
 ### Backend on Railway
 

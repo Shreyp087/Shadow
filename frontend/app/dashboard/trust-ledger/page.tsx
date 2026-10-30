@@ -6,7 +6,7 @@ export default function TrustLedgerPage() {
       <CardHeader>
         <CardTitle>Trust Ledger</CardTitle>
         <CardDescription>
-          Immutable evidence views will live here once the backend exposes ledger retrieval endpoints.
+          Tamper-evident ledger views will live here once the backend exposes ledger retrieval endpoints.
         </CardDescription>
       </CardHeader>
       <CardContent>

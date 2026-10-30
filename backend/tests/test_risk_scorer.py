@@ -17,6 +17,16 @@ class FakeAnthropicClient:
         return SimpleNamespace(content=[SimpleNamespace(text=json.dumps(self.payload))])
 
 
+class FailingClient:
+    messages = None
+
+    def __init__(self) -> None:
+        self.messages = self
+
+    async def create(self, **_: object) -> SimpleNamespace:
+        raise TimeoutError("provider detail must not be persisted")
+
+
 def test_risk_scorer_safe_category() -> None:
     assessment = asyncio.run(
         RiskScorer(
@@ -111,3 +121,20 @@ def test_risk_scorer_critical_category() -> None:
     assert assessment.score == 96
     assert assessment.category == RiskCategory.CRITICAL
     assert len(assessment.indicators) == 3
+
+
+def test_risk_scorer_marks_fallback_and_exposes_only_safe_failure_type() -> None:
+    assessment = asyncio.run(
+        RiskScorer(FailingClient(), model_name="local-judge").score(
+            "prompt",
+            "response",
+            "PROMPT_INJECTION",
+        )
+    )
+
+    assert assessment.score == 50
+    assert assessment.category == RiskCategory.MEDIUM
+    assert assessment.judge_failed is True
+    assert assessment.failure_type == "TimeoutError"
+    assert "TimeoutError" in assessment.reason
+    assert "provider detail" not in assessment.reason

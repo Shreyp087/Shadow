@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
-import { ClerkProvider } from "@clerk/nextjs";
 import { IBM_Plex_Mono, Space_Grotesk } from "next/font/google";
 import type { ReactNode } from "react";
+
+import { AppAuthProvider } from "@/components/app-auth-provider";
 
 import "./globals.css";
 
@@ -18,7 +19,7 @@ const bodyFont = IBM_Plex_Mono({
 
 export const metadata: Metadata = {
   title: "ShadowLedger",
-  description: "Continuous adversarial testing with an immutable trust ledger."
+  description: "Continuous adversarial testing with a tamper-evident trust ledger."
 };
 
 export default function RootLayout({
@@ -26,10 +27,14 @@ export default function RootLayout({
 }: Readonly<{
   children: ReactNode;
 }>) {
+  const clerkConfigured = Boolean(
+    process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY && process.env.CLERK_SECRET_KEY
+  );
+
   return (
     <html lang="en" className={`${headingFont.variable} ${bodyFont.variable}`}>
       <body className="font-[family-name:var(--font-body)]">
-        <ClerkProvider>{children}</ClerkProvider>
+        <AppAuthProvider clerkConfigured={clerkConfigured}>{children}</AppAuthProvider>
       </body>
     </html>
   );

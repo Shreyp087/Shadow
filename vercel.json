@@ -1,0 +1,27 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "services": {
+    "frontend": {
+      "root": "frontend/",
+      "framework": "nextjs",
+      "installCommand": "npm ci",
+      "buildCommand": "npm run build"
+    },
+    "backend": {
+      "root": "backend/",
+      "framework": "fastapi",
+      "entrypoint": "pyproject.toml",
+      "buildCommand": "python scripts/prepare_deployment.py",
+      "functions": {
+        "main.py": { "maxDuration": 300 }
+      }
+    }
+  },
+  "rewrites": [
+    { "source": "/api/:path*/", "destination": { "service": "backend", "path": "/api/:path*" } },
+    { "source": "/api/:path*", "destination": { "service": "backend" } },
+    { "source": "/health", "destination": { "service": "backend" } },
+    { "source": "/", "destination": { "service": "frontend", "path": "/index" } },
+    { "source": "/:path*", "destination": { "service": "frontend" } }
+  ]
+}

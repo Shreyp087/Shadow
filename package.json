@@ -1,0 +1,35 @@
+{
+  "name": "shadowledger",
+  "version": "0.1.0",
+  "private": true,
+  "description": "npm-first development orchestration for the ShadowLedger monorepo",
+  "engines": {
+    "node": ">=20.6.0",
+    "npm": ">=10.0.0"
+  },
+  "scripts": {
+    "setup": "node scripts/setup.mjs",
+    "setup:backend": "node scripts/setup.mjs --backend-only",
+    "setup:frontend": "node scripts/setup.mjs --frontend-only",
+    "dev": "concurrently --kill-others --names api,web --prefix-colors cyan,magenta \"npm:dev:backend\" \"npm:dev:frontend\"",
+    "dev:backend": "node --env-file=.env scripts/backend.mjs dev",
+    "dev:frontend": "node --env-file=.env scripts/frontend.mjs dev",
+    "db:prepare": "node --env-file=.env scripts/backend.mjs prepare",
+    "db:migrate": "node --env-file=.env scripts/backend.mjs migrate",
+    "db:seed": "node --env-file=.env scripts/backend.mjs seed",
+    "test": "concurrently --kill-others-on-fail --names scripts,backend,frontend --prefix-colors yellow,cyan,magenta \"npm:test:scripts\" \"npm:test:backend\" \"npm:test:frontend\"",
+    "test:scripts": "node --test scripts/*.test.mjs",
+    "test:backend": "node --env-file=.env scripts/backend.mjs test",
+    "test:frontend": "node --env-file=.env scripts/frontend.mjs test",
+    "lint": "node --env-file=.env scripts/frontend.mjs lint",
+    "typecheck": "node --env-file=.env scripts/frontend.mjs typecheck",
+    "build": "node --env-file=.env scripts/frontend.mjs build",
+    "check:api": "node --env-file=.env scripts/backend.mjs check-api",
+    "check:data": "node --env-file=.env scripts/backend.mjs check-data",
+    "keys:rotate": "node --env-file=.env scripts/backend.mjs rotate-target-keys",
+    "verify:ledger": "node --env-file=.env scripts/backend.mjs verify-ledger"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.4"
+  }
+}

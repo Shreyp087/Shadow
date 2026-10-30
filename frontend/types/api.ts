@@ -13,6 +13,8 @@ export type AttackVectorCategory =
 export type SeverityLevel = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 export type RiskCategory = "SAFE" | "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 export type AttackSurfaceTrend = "IMPROVING" | "WORSENING" | "STABLE";
+export type LLMRole = "attacker" | "mutator" | "judge";
+export type LLMProvider = "hosted_openai" | "hosted_anthropic" | "local_openai_compatible";
 
 export type JsonValue =
   | string
@@ -46,6 +48,8 @@ export interface UserResponse {
 export interface CreateTargetSystemRequest {
   name: string;
   description: string | null;
+  role?: string;
+  system_prompt?: string;
   api_endpoint: string;
   target_type: TargetSystemType;
   api_key: string;
@@ -58,12 +62,41 @@ export interface TargetSystemResponse {
   user_id: UUID;
   name: string;
   description: string | null;
+  role?: string;
+  system_prompt?: string;
   api_endpoint: string;
   target_type: TargetSystemType;
-  api_key_masked: string;
+  api_key_configured: boolean;
+  credential_source?: "personal" | "app" | "none";
+  is_starter?: boolean;
   model_name: string;
   created_at: ISODateTimeString;
   is_active: boolean;
+}
+
+export interface LLMRoleSettingResponse {
+  role: LLMRole;
+  provider: LLMProvider;
+  model_name: string;
+  base_url: string | null;
+  api_key_configured: boolean;
+  is_default: boolean;
+}
+
+export interface UpdateLLMRoleSettingRequest {
+  provider: LLMProvider;
+  model_name: string;
+  base_url: string | null;
+  api_key?: string;
+}
+
+export interface LLMConnectionTestResponse {
+  role: LLMRole;
+  ok: boolean;
+  message: string;
+  model_name: string;
+  base_url: string | null;
+  latency_ms: number | null;
 }
 
 export interface CreateAttackRunRequest {
@@ -85,6 +118,7 @@ export interface AttackRunResponse {
   status: AttackRunStatus;
   started_at: ISODateTimeString | null;
   completed_at: ISODateTimeString | null;
+  failure_reason?: string | null;
   total_attacks: number;
   vulnerabilities_found: number;
   risk_score_avg: DecimalString | null;

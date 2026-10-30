@@ -25,6 +25,7 @@ class AttackRunResponse(ORMResponseModel):
     status: AttackRunStatus
     started_at: datetime | None
     completed_at: datetime | None
+    failure_reason: str | None = None
     total_attacks: int = Field(ge=0)
     vulnerabilities_found: int = Field(ge=0)
     risk_score_avg: Decimal | None

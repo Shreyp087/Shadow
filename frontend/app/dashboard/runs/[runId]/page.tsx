@@ -1,7 +1,8 @@
 "use client";
 
 import { AlertTriangle, BarChart3, Clock3, Download, Fingerprint, ShieldAlert } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import useSWR from "swr";
 
@@ -18,6 +19,7 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useApiClient } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
+import { isActiveRun } from "@/lib/run-status";
 import type {
   AttackResultResponse,
   AttackRunResponse,
@@ -64,36 +66,33 @@ const riskScoreToneClasses: Record<RiskCategory, string> = {
 const orderedRiskCategories: RiskCategory[] = ["SAFE", "LOW", "MEDIUM", "HIGH", "CRITICAL"];
 const filterOptions: FilterOption[] = ["ALL", "CRITICAL", "HIGH", "MEDIUM", "LOW", "SAFE"];
 
-interface RunDetailPageProps {
-  params: {
-    runId: string;
-  };
-}
-
-export default function RunDetailPage({
-  params
-}: RunDetailPageProps) {
+export default function RunDetailPage() {
+  const { runId } = useParams<{ runId: string }>();
   const apiClient = useApiClient();
+  const router = useRouter();
   const [activeFilter, setActiveFilter] = useState<FilterOption>("ALL");
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedResult, setSelectedResult] = useState<AttackResultResponse | null>(null);
   const [isDownloadingReport, setIsDownloadingReport] = useState(false);
   const [reportDownloadError, setReportDownloadError] = useState<string | null>(null);
+  const [isRestarting, setIsRestarting] = useState(false);
+  const [restartError, setRestartError] = useState<string | null>(null);
 
   const {
     data: runDetail,
     error: runDetailError,
     isLoading: runDetailLoading
-  } = useSWR(["attack-run-detail", params.runId], () => apiClient.getAttackRunDetail(params.runId), {
-    refreshInterval: (currentData) => (currentData?.run.status === "RUNNING" ? 3000 : 0)
+  } = useSWR(["attack-run-detail", runId], () => apiClient.getAttackRunDetail(runId), {
+    refreshInterval: (currentData) => (isActiveRun(currentData?.run.status) ? 3000 : 0)
   });
 
   const {
     data: runResultsData,
     error: runResultsError,
-    isLoading: runResultsLoading
-  } = useSWR(["attack-run-results", params.runId], () => apiClient.getAllRunResults(params.runId), {
-    refreshInterval: runDetail?.run.status === "RUNNING" ? 3000 : 0
+    isLoading: runResultsLoading,
+    mutate: refreshResults
+  } = useSWR(["attack-run-results", runId], () => apiClient.getAllRunResults(runId), {
+    refreshInterval: isActiveRun(runDetail?.run.status) ? 3000 : 0
   });
 
   const {
@@ -103,8 +102,14 @@ export default function RunDetailPage({
 
   const run = runDetail?.run ?? null;
   const summary = runDetail?.summary;
-  const allResults = runResultsData?.results ?? [];
+  const allResults = useMemo(() => runResultsData?.results ?? [], [runResultsData?.results]);
   const targetSystemId = run?.target_system_id ?? null;
+
+  useEffect(() => {
+    if (run?.status && !isActiveRun(run.status)) {
+      void refreshResults();
+    }
+  }, [run?.status, refreshResults]);
 
   const {
     data: riskTrend = [],
@@ -114,7 +119,7 @@ export default function RunDetailPage({
     targetSystemId ? ["target-risk-trend", targetSystemId] : null,
     () => apiClient.getTargetRiskTrend(targetSystemId as string),
     {
-      refreshInterval: run?.status === "RUNNING" ? 3000 : 0
+      refreshInterval: isActiveRun(run?.status) ? 3000 : 0
     }
   );
 
@@ -167,12 +172,27 @@ export default function RunDetailPage({
     (runResultsError instanceof Error && runResultsError.message) ||
     (riskTrendError instanceof Error && riskTrendError.message) ||
     reportDownloadError ||
+    restartError ||
     (targetSystemsError instanceof Error && targetSystemsError.message) ||
     null;
 
   function handleFilterChange(filter: FilterOption) {
     setActiveFilter(filter);
     setCurrentPage(1);
+  }
+
+  async function handleRestart() {
+    if (!run || isRestarting) return;
+    setRestartError(null);
+    setIsRestarting(true);
+    try {
+      const nextRun = await apiClient.createAttackRun({ target_system_id: run.target_system_id });
+      router.push(`/dashboard/runs/${nextRun.id}`);
+    } catch (error) {
+      setRestartError(error instanceof Error ? error.message : "Unable to start a new scan.");
+    } finally {
+      setIsRestarting(false);
+    }
   }
 
   async function handleDownloadReport() {
@@ -209,10 +229,10 @@ export default function RunDetailPage({
               <CardDescription className="text-xs uppercase tracking-[0.28em] text-teal-200/70">
                 Attack run detail
               </CardDescription>
-              <CardTitle className="mt-3 text-4xl text-white">Run {params.runId}</CardTitle>
+              <CardTitle className="mt-3 text-3xl text-white">Scan for {targetSystemName}</CardTitle>
+              <p className="mt-2 break-all font-mono text-xs text-slate-400">Run {runId}</p>
               <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-300">
-                Inspect run state, risk distribution, and full result evidence while ShadowLedger continues polling
-                active executions every three seconds.
+                Follow scan progress, risk scores, and response evidence as each test finishes.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-3">
@@ -222,7 +242,7 @@ export default function RunDetailPage({
                 size="sm"
                 className="border-white/20 bg-white/5 text-white hover:bg-white/10 hover:text-white"
                 onClick={handleDownloadReport}
-                disabled={!run || isDownloadingReport}
+                disabled={!run || isActiveRun(run.status) || run.total_attacks === 0 || isDownloadingReport}
               >
                 <Download className="mr-2 h-4 w-4" />
                 {isDownloadingReport ? "Preparing Report..." : "Download Report"}
@@ -232,6 +252,25 @@ export default function RunDetailPage({
           </div>
         </CardHeader>
         <CardContent className="pt-6">
+          {run?.status === "PENDING" ? (
+            <p role="status" className="mb-5 flex items-center gap-2 rounded-2xl bg-white/10 p-4 text-sm text-slate-200">
+              <Clock3 className="h-4 w-4 shrink-0" aria-hidden="true" />
+              Waiting for the scan worker. This page updates automatically when testing begins.
+            </p>
+          ) : run?.status === "RUNNING" ? (
+            <p role="status" className="mb-5 rounded-2xl bg-white/10 p-4 text-sm text-slate-200">
+              Scan in progress. {run.total_attacks} {run.total_attacks === 1 ? "test completed" : "tests completed"}.
+            </p>
+          ) : run?.status === "FAILED" ? (
+            <div role="alert" className="mb-5 rounded-2xl border border-orange-300/30 bg-orange-400/10 p-4">
+              <p className="text-sm text-orange-100">{run.failure_reason || "The scan stopped before completion. You can start a new full scan."}</p>
+              <Button type="button" className="mt-3" onClick={() => void handleRestart()} disabled={isRestarting}>
+                {isRestarting ? "Starting scan..." : "Start new full scan"}
+              </Button>
+              <p className="mt-2 text-xs text-orange-100/80">A new scan uses provider credits. Any existing evidence stays in this run.</p>
+              {restartError ? <p className="mt-2 text-sm text-orange-100">{restartError}</p> : null}
+            </div>
+          ) : null}
           {runDetailLoading ? (
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               {Array.from({ length: 6 }).map((_, index) => (

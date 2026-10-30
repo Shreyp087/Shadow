@@ -5,6 +5,10 @@ from datetime import datetime, timezone
 from uuid import uuid4
 from unittest.mock import AsyncMock
 
+import pytest
+from pydantic import ValidationError
+
+from app.core.config import get_settings
 from models.enums import TargetSystemType
 from models.target_system import TargetSystem
 from models.user import User
@@ -47,7 +51,19 @@ class FakeSession:
         self.refresh_calls += 1
 
 
-def test_list_target_systems_returns_masked_api_key(monkeypatch) -> None:
+@pytest.fixture(autouse=True)
+def isolate_endpoint_environment(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.delenv("ALLOW_INSECURE_TARGET_ENDPOINTS", raising=False)
+    monkeypatch.delenv("ALLOW_PRIVATE_TARGET_ENDPOINTS", raising=False)
+    get_settings.cache_clear()
+
+    yield
+
+    get_settings.cache_clear()
+
+
+def test_list_target_systems_returns_only_api_key_configuration_state(monkeypatch) -> None:
     async def run_test() -> None:
         user = User(id=uuid4(), clerk_user_id="clerk_user_123", email="user@example.com")
         target_system = TargetSystem(
@@ -69,7 +85,6 @@ def test_list_target_systems_returns_masked_api_key(monkeypatch) -> None:
             "_get_authenticated_user",
             AsyncMock(return_value=user),
         )
-        monkeypatch.setattr(target_systems_route, "decrypt_value", lambda value: "sk-test-1234")
 
         response = await target_systems_route.list_target_systems(
             db_session=db_session,
@@ -77,13 +92,16 @@ def test_list_target_systems_returns_masked_api_key(monkeypatch) -> None:
         )
 
         assert response.data is not None
-        assert response.data[0].api_key_masked == "****1234"
-        assert "api_key_encrypted" not in response.data[0].model_dump()
+        serialized = response.data[0].model_dump()
+        assert response.data[0].api_key_configured is True
+        assert "api_key_encrypted" not in serialized
+        assert "api_key" not in serialized
+        assert "api_key_masked" not in serialized
 
     asyncio.run(run_test())
 
 
-def test_create_target_system_returns_masked_api_key(monkeypatch) -> None:
+def test_create_target_system_accepts_secret_and_returns_configuration_state(monkeypatch) -> None:
     async def run_test() -> None:
         user = User(id=uuid4(), clerk_user_id="clerk_user_123", email="user@example.com")
         db_session = FakeSession()
@@ -93,13 +111,20 @@ def test_create_target_system_returns_masked_api_key(monkeypatch) -> None:
             "_get_mutating_user",
             AsyncMock(return_value=user),
         )
-        monkeypatch.setattr(target_systems_route, "encrypt_value", lambda value: "encrypted-secret")
-        monkeypatch.setattr(target_systems_route, "decrypt_value", lambda value: "sk-live-5678")
+        observed_plaintext: list[str] = []
+
+        def fake_encrypt(value: str) -> str:
+            observed_plaintext.append(value)
+            return "encrypted-secret"
+
+        monkeypatch.setattr(target_systems_route, "encrypt_value", fake_encrypt)
 
         response = await target_systems_route.create_target_system(
             payload=CreateTargetSystemRequest(
                 name="Internal HR Assistant",
                 description="HR assistant",
+                role="HR Support",
+                system_prompt="You are an HR support assistant. Keep employee data private.",
                 api_endpoint="https://example.test/messages",
                 target_type=TargetSystemType.ANTHROPIC,
                 api_key="sk-live-5678",
@@ -111,11 +136,136 @@ def test_create_target_system_returns_masked_api_key(monkeypatch) -> None:
         )
 
         assert response.data is not None
-        assert response.data.api_key_masked == "****5678"
+        assert response.data.api_key_configured is True
+        assert "sk-live-5678" not in response.data.model_dump_json()
+        assert observed_plaintext == ["sk-live-5678"]
         assert db_session.commit_calls == 1
         assert db_session.refresh_calls == 1
         stored_target = db_session.added[0]
         assert isinstance(stored_target, TargetSystem)
         assert stored_target.api_key_encrypted == "encrypted-secret"
+        assert stored_target.role == "HR Support"
+        assert response.data.system_prompt == stored_target.system_prompt
 
     asyncio.run(run_test())
+
+
+def test_create_target_system_request_hides_secret_value() -> None:
+    payload = CreateTargetSystemRequest(
+        name="Internal HR Assistant",
+        api_endpoint="https://example.test/messages",
+        target_type=TargetSystemType.ANTHROPIC,
+        api_key="sk-sensitive-value",
+        model_name="claude-3-5-sonnet",
+    )
+
+    assert payload.api_key.get_secret_value() == "sk-sensitive-value"
+    assert "sk-sensitive-value" not in repr(payload)
+    assert "sk-sensitive-value" not in payload.model_dump_json()
+
+
+def test_create_target_system_request_requires_https_by_default() -> None:
+    with pytest.raises(ValidationError, match="must use HTTPS"):
+        CreateTargetSystemRequest(
+            name="Local target",
+            api_endpoint="http://localhost:9000/v1",
+            target_type=TargetSystemType.OPENAI_COMPATIBLE,
+            api_key="local-key",
+            model_name="local-model",
+        )
+
+
+def test_create_target_system_request_allows_explicit_development_http_override(monkeypatch) -> None:
+    monkeypatch.setenv("ALLOW_INSECURE_TARGET_ENDPOINTS", "true")
+    get_settings.cache_clear()
+
+    payload = CreateTargetSystemRequest(
+        name="Local target",
+        api_endpoint="http://localhost:9000/v1",
+        target_type=TargetSystemType.OPENAI_COMPATIBLE,
+        api_key="local-key",
+        model_name="local-model",
+    )
+
+    assert str(payload.api_endpoint) == "http://localhost:9000/v1"
+
+
+def test_create_target_system_request_rejects_http_override_in_production(monkeypatch) -> None:
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("ALLOW_INSECURE_TARGET_ENDPOINTS", "true")
+    get_settings.cache_clear()
+
+    with pytest.raises(ValidationError, match="must use HTTPS"):
+        CreateTargetSystemRequest(
+            name="Local target",
+            api_endpoint="http://localhost:9000/v1",
+            target_type=TargetSystemType.OPENAI_COMPATIBLE,
+            api_key="local-key",
+            model_name="local-model",
+        )
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        "https://user:password@example.test/v1",
+        "https://example.test/v1#secret-fragment",
+        "https://example.test/v1?api_key=must-not-be-in-a-url",
+    ],
+)
+def test_create_target_system_request_rejects_endpoint_credentials_and_fragments(endpoint: str) -> None:
+    with pytest.raises(ValidationError):
+        CreateTargetSystemRequest(
+            name="Unsafe target",
+            api_endpoint=endpoint,
+            target_type=TargetSystemType.OPENAI_COMPATIBLE,
+            api_key="target-key",
+            model_name="target-model",
+        )
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        "https://127.0.0.1/v1",
+        "https://10.0.0.5/v1",
+        "https://169.254.169.254/latest/meta-data",
+        "https://[::1]/v1",
+    ],
+)
+def test_create_target_system_request_rejects_literal_non_global_addresses(endpoint: str) -> None:
+    with pytest.raises(ValidationError, match="private or non-global"):
+        CreateTargetSystemRequest(
+            name="Unsafe target",
+            api_endpoint=endpoint,
+            target_type=TargetSystemType.OPENAI_COMPATIBLE,
+            api_key="target-key",
+            model_name="target-model",
+        )
+
+
+def test_create_target_system_request_allows_explicit_private_target_override(monkeypatch) -> None:
+    monkeypatch.setenv("ALLOW_PRIVATE_TARGET_ENDPOINTS", "true")
+    get_settings.cache_clear()
+
+    payload = CreateTargetSystemRequest(
+        name="Authorized internal target",
+        api_endpoint="https://10.0.0.5/v1",
+        target_type=TargetSystemType.OPENAI_COMPATIBLE,
+        api_key="target-key",
+        model_name="target-model",
+    )
+
+    assert str(payload.api_endpoint) == "https://10.0.0.5/v1"
+
+
+def test_create_target_system_request_allows_global_literal_address() -> None:
+    payload = CreateTargetSystemRequest(
+        name="Public target",
+        api_endpoint="https://8.8.8.8/v1",
+        target_type=TargetSystemType.OPENAI_COMPATIBLE,
+        api_key="target-key",
+        model_name="target-model",
+    )
+
+    assert str(payload.api_endpoint) == "https://8.8.8.8/v1"

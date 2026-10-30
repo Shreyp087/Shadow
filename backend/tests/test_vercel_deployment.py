@@ -126,3 +126,22 @@ def test_cold_workflow_import_works_in_real_vercel_sandbox():
         assert "sqlalchemy" not in sandbox.table
         assert "app.workflows.scan_runtime" not in sandbox.table
         assert "httpx" not in sandbox.table
+        assert "app.workflow_transport" not in sandbox.table
+
+
+def test_scan_continues_across_all_five_attack_reordering_boundaries(monkeypatch):
+    async def exercise():
+        vectors = [f"vector-{index}" for index in range(25)]
+        monkeypatch.setattr(scans, "begin_scan", AsyncMock(return_value=True))
+        attempt = AsyncMock(return_value=False)
+        monkeypatch.setattr(scans, "execute_attempt", attempt)
+        reorder = AsyncMock(side_effect=lambda _run, remaining, _all: list(reversed(remaining)))
+        monkeypatch.setattr(scans, "reorder_vectors", reorder)
+        finish = AsyncMock()
+        monkeypatch.setattr(scans, "finish_scan", finish)
+        assert await scans.attack_scan.func("run", vectors) == "completed"
+        assert attempt.await_count == 25
+        assert {call.args[1] for call in attempt.await_args_list} == set(vectors)
+        assert reorder.await_count == 4
+        finish.assert_awaited_once_with("run", succeeded=True)
+    asyncio.run(exercise())

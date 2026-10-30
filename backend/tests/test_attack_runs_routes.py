@@ -57,8 +57,17 @@ class FakeExecuteResult:
         return self._items
 
 
-def test_create_attack_run_returns_pending_response_and_background_task(monkeypatch) -> None:
+@pytest.mark.parametrize("execution", ["local", "vercel", "queue_failure"])
+def test_create_attack_run_returns_pending_response_and_background_task(monkeypatch, execution) -> None:
     async def run_test() -> None:
+        monkeypatch.setenv("VERCEL", "0" if execution == "local" else "1")
+        if execution != "local":
+            from vercel import workflow
+            dispatch = AsyncMock(
+                return_value=SimpleNamespace(run_id="workflow-123"),
+                side_effect=RuntimeError("queue unavailable") if execution == "queue_failure" else None,
+            )
+            monkeypatch.setattr(workflow, "start", dispatch)
         db_session = FakeSession()
         user = User(id=uuid4(), clerk_user_id="clerk_user_123", email="user@example.com")
         target_system = TargetSystem(
@@ -100,17 +109,28 @@ def test_create_attack_run_returns_pending_response_and_background_task(monkeypa
         )
         background_tasks = BackgroundTasks()
 
-        response = await attack_runs_route.create_attack_run(
+        request = attack_runs_route.create_attack_run(
             payload=payload,
             background_tasks=background_tasks,
             db_session=db_session,
             clerk_user_id="clerk_user_123",
         )
 
+        if execution == "queue_failure":
+            with pytest.raises(HTTPException) as error:
+                await request
+            assert error.value.status_code == 503
+            assert db_session.added[0].status == AttackRunStatus.FAILED
+            assert background_tasks.tasks == []
+            return
+        response = await request
         assert response.data is not None
         assert response.data.status == AttackRunStatus.PENDING
         assert response.meta["vector_count"] == 3
-        assert len(background_tasks.tasks) == 1
+        assert len(background_tasks.tasks) == (1 if execution == "local" else 0)
+        if execution == "vercel":
+            assert response.meta["workflow_run_id"] == "workflow-123"
+            assert dispatch.await_args.args[1] == str(response.data.id)
         assert db_session.commit_calls == 1
 
     asyncio.run(run_test())

@@ -63,6 +63,7 @@ class AttackerAgent:
         *,
         prompt_override: str | None = None,
         is_mutation: bool = False,
+        result_id: UUID | None = None,
     ) -> AttackResult:
         attack_run = await self.db_session.get(AttackRun, attack_run_id)
         if attack_run is None:
@@ -79,7 +80,7 @@ class AttackerAgent:
             raw_response_text = raw_response_text or f"[connector-error] {victim_response.error}"
 
         attack_result = AttackResult(
-            id=uuid.uuid4(),
+            id=result_id or uuid.uuid4(),
             attack_run_id=attack_run_id,
             attack_vector_id=vector.id,
             prompt_sent=rendered_prompt,

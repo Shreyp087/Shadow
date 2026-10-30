@@ -1,6 +1,6 @@
 # ShadowLedger
 
-ShadowLedger is an adversarial AI security platform for continuously probing target LLM systems, scoring risky behavior, and preserving every result in an append-only trust ledger. This monorepo packages the operational dashboard, FastAPI backend, analytics, reporting pipeline, and deployment configuration needed to run local scans and ship production services on Vercel and Railway.
+ShadowLedger is an adversarial AI security platform for continuously probing target LLM systems, scoring risky behavior, and preserving every result in an append-only trust ledger. This monorepo packages the operational dashboard, FastAPI backend, analytics, reporting pipeline, and deployment configuration needed to run local scans and deploy the frontend and backend together on Vercel.
 
 ## What It Does
 
@@ -426,17 +426,39 @@ The GitHub Actions workflow in `.github/workflows/ci.yml` runs on pushes to `mai
 
 ## Deployment
 
-### Frontend on Vercel
+### Frontend and backend together on Vercel
 
-- Vercel config lives in `frontend/vercel.json`.
-- API proxy rewrites are resolved in `frontend/next.config.mjs` using `RAILWAY_BACKEND_URL` or `NEXT_PUBLIC_API_URL`.
-- Set the Vercel project root to `frontend/`.
-- Configure `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, `NEXT_PUBLIC_API_URL`, and `RAILWAY_BACKEND_URL` in the Vercel project's environment variables for each deployed environment. Use a hosted HTTPS backend URL; `localhost` refers to the deployed server or the visitor's machine, not your development backend.
-- Set `NEXT_PUBLIC_DEMO_AUTH=false`; production always requires Clerk authentication. Use the publishable and secret keys from the same Clerk application.
-- For a CLI deployment, run `npx vercel login`, then run `npx vercel link` and `npx vercel --prod` from `frontend/`.
-- The public landing page can deploy before Clerk is configured; workspace access stays closed. After adding both Clerk keys, redeploy to enable sign-in.
+The repository-root `vercel.json` declares a Next.js frontend service and a Python FastAPI backend service in one Vercel project. Keep the project root at the repository root and deploy from there:
 
-### Backend on Railway
+```sh
+npx vercel login
+npx vercel link
+npx vercel deploy --prod
+```
+
+The root routing sends `/api/*` and `/health` to Python, and all application pages to Next.js. Set `NEXT_PUBLIC_API_URL=/` and `NEXT_PUBLIC_DEMO_AUTH=false` as non-secret production configuration. A separate backend host or Railway account is unnecessary. `frontend/vercel.json` remains available for standalone frontend deployments.
+
+Vercel installs Python 3.12 and the dependencies locked in `backend/uv.lock`. The workflow registry is declared in `backend/pyproject.toml`. Hosted scan launches enqueue a Vercel Workflow; each primary attack and each mutation executes in a separate bounded step. Credentials are loaded inside steps, never passed as workflow arguments. Deterministic result IDs and transactions prevent retries from duplicating stored results, metrics, or ledger entries. Local development continues using FastAPI background tasks.
+
+**Deployment without credentials:** no local `.env` files are uploaded. The landing page remains available, sign-in stays disabled, and protected backend routes return `503` while configuration is incomplete. `/api/status` returns `200` with the missing variable names and execution mode, without accessing the database or returning any values. `/health` returns `503` with `db: not_configured` until a database URL is supplied. A `configured` status reports presence of settings, not verified database connectivity.
+
+When ready, configure the following manually in Vercel's environment settings, then redeploy:
+
+| Variable | Purpose |
+| --- | --- |
+| `DATABASE_URL` | Hosted PostgreSQL connection string. Neon can be provisioned through Vercel Marketplace; the database itself is hosted by Neon. |
+| `ENCRYPTION_KEY` | A fresh Fernet key for encrypting saved provider credentials. Keep this stable across deployments. |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY` | Matching Clerk application keys for frontend authentication. |
+| `CLERK_JWKS_URL` | Your Clerk instance's `/.well-known/jwks.json` URL. `CLERK_JWT_KEY` or `CLERK_FRONTEND_API_URL` is also supported. |
+| `OPENAI_API_KEY` | Optional server-side fallback for hosted roles without their own saved provider key. |
+
+`ENVIRONMENT` defaults to `production` on Vercel, and the frontend origin defaults to Vercel's deployment domain. Set `FRONTEND_ORIGIN` and `CLERK_AUTHORIZED_PARTIES` explicitly when using a custom domain. For PostgreSQL connection URLs used with asyncpg, use `postgresql+asyncpg://...` and the asyncpg TLS parameter `ssl=require`; libpq-only URL parameters such as `sslmode` and `channel_binding` are not asyncpg keyword arguments.
+
+Before enabling workspace traffic, run `alembic upgrade head` and `python -m seeds.run_seeds` from `backend/` against the new database using a trusted local environment with its production `DATABASE_URL` set. Migrations and seed writes are deliberately separate from request handling and credential-free builds. No database is provisioned by the deployment itself.
+
+See [Vercel Services](https://vercel.com/docs/services), [Python Workflows](https://vercel.com/kb/guide/python-and-durable-workflows), and [Postgres integrations](https://vercel.com/docs/postgres) for platform setup.
+
+### Optional separate backend on Railway
 
 - Railway config lives in `backend/railway.toml`.
 - Set the Railway service root to `backend/`.
@@ -450,6 +472,7 @@ The GitHub Actions workflow in `.github/workflows/ci.yml` runs on pushes to `mai
 | Method | Path | Auth | Description |
 | --- | --- | --- | --- |
 | `GET` | `/health` | No | Returns service version and live DB connectivity state |
+| `GET` | `/api/status` | No | Reports configuration readiness and scan execution mode; never returns credential values |
 
 ### LLM Role Settings
 

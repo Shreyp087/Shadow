@@ -55,3 +55,18 @@ def test_settings_default_private_target_override_to_disabled(monkeypatch) -> No
         assert get_settings().allow_private_target_endpoints is False
     finally:
         get_settings.cache_clear()
+
+
+def test_vercel_defaults_to_production_and_its_public_origin(monkeypatch) -> None:
+    monkeypatch.delenv("ENVIRONMENT", raising=False)
+    monkeypatch.delenv("FRONTEND_ORIGIN", raising=False)
+    monkeypatch.setenv("VERCEL", "1")
+    monkeypatch.setenv("VERCEL_ENV", "production")
+    monkeypatch.setenv("VERCEL_PROJECT_PRODUCTION_URL", "shadowledger-iota.vercel.app")
+    get_settings.cache_clear()
+    try:
+        settings = get_settings()
+        assert settings.environment == "production"
+        assert settings.frontend_origin == "https://shadowledger-iota.vercel.app"
+    finally:
+        get_settings.cache_clear()

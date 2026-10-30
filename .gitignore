@@ -6,6 +6,7 @@ dist/
 coverage/
 *.tsbuildinfo
 .vercel/
+.workflow-data/
 
 # Python
 __pycache__/

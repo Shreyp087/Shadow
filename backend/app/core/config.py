@@ -28,14 +28,22 @@ def get_settings() -> Settings:
         "DATABASE_URL",
         "postgresql+asyncpg://shadowledger:shadowledger@localhost:5432/shadowledger",
     )
-    environment = os.getenv("ENVIRONMENT", "development")
+    environment = os.getenv(
+        "ENVIRONMENT", "production" if os.getenv("VERCEL") == "1" else "development"
+    )
+    deployment_host = (
+        os.getenv("VERCEL_PROJECT_PRODUCTION_URL")
+        if os.getenv("VERCEL_ENV") == "production"
+        else os.getenv("VERCEL_URL")
+    )
+    default_origin = f"https://{deployment_host}" if deployment_host else "http://localhost:4200"
 
     return Settings(
         app_name=os.getenv("APP_NAME", "ShadowLedger API"),
         environment=environment,
         debug=_environment_flag("DEBUG"),
         database_url=_normalize_database_url(raw_database_url, environment),
-        frontend_origin=os.getenv("FRONTEND_ORIGIN", "http://localhost:4200"),
+        frontend_origin=os.getenv("FRONTEND_ORIGIN", default_origin),
         demo_auth_enabled=_environment_flag("NEXT_PUBLIC_DEMO_AUTH"),
         allow_insecure_target_endpoints=_environment_flag("ALLOW_INSECURE_TARGET_ENDPOINTS"),
         allow_private_target_endpoints=_environment_flag("ALLOW_PRIVATE_TARGET_ENDPOINTS"),

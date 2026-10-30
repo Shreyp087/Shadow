@@ -1,14 +1,12 @@
 import { fileURLToPath } from "node:url";
 
 /** @type {import('next').NextConfig} */
-const isDevelopment = process.env.NODE_ENV !== "production";
-const railwayBackendUrl = process.env.RAILWAY_BACKEND_URL;
-const localApiUrl = process.env.NEXT_PUBLIC_API_URL;
-const hasRealRailwayUrl =
-  typeof railwayBackendUrl === "string" &&
-  railwayBackendUrl.length > 0 &&
-  !railwayBackendUrl.includes("your-shadowledger-backend");
-const backendUrl = isDevelopment ? localApiUrl : railwayBackendUrl || localApiUrl;
+const configuredBackendUrl =
+  process.env.BACKEND_URL || process.env.RAILWAY_BACKEND_URL || process.env.NEXT_PUBLIC_API_URL;
+// Same-origin production API traffic is routed to Python by root vercel.json.
+const backendUrl = configuredBackendUrl && /^https?:\/\//.test(configuredBackendUrl)
+  ? configuredBackendUrl.replace(/\/$/, "")
+  : undefined;
 
 const nextConfig = {
   outputFileTracingRoot: fileURLToPath(new URL(".", import.meta.url)),
@@ -16,14 +14,14 @@ const nextConfig = {
     externalDir: true
   },
   async rewrites() {
-    if (!backendUrl && !hasRealRailwayUrl) {
+    if (!backendUrl) {
       return [];
     }
 
     return [
       {
         source: "/api/:path*",
-        destination: `${(hasRealRailwayUrl && !isDevelopment ? railwayBackendUrl : backendUrl).replace(/\/$/, "")}/api/:path*`
+        destination: `${backendUrl}/api/:path*`
       }
     ];
   }

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime, timezone
 from math import ceil
 from typing import Annotated
@@ -153,18 +154,35 @@ async def create_attack_run(
     await db_session.commit()
     await db_session.refresh(attack_run)
 
-    background_tasks.add_task(
-        _execute_attack_run_background,
-        attack_run.id,
-        target_system.id,
-        vector_ids,
-    )
+    workflow_run_id = None
+    if os.getenv("VERCEL") == "1":
+        try:
+            from vercel import workflow
+            from app.workflows import attack_scan
+
+            handle = await workflow.start(
+                attack_scan, str(attack_run.id), [str(item) for item in vector_ids]
+            )
+            workflow_run_id = handle.run_id
+        except Exception:
+            attack_run.status = AttackRunStatus.FAILED
+            attack_run.completed_at = datetime.now(timezone.utc)
+            await db_session.commit()
+            raise HTTPException(status_code=503, detail="Scan could not be queued") from None
+    else:
+        background_tasks.add_task(
+            _execute_attack_run_background,
+            attack_run.id,
+            target_system.id,
+            vector_ids,
+        )
 
     return APIResponse(
         data=AttackRunResponse.model_validate(attack_run),
         meta={
             "vector_count": len(vector_ids),
             "status": attack_run.status.value,
+            **({"workflow_run_id": workflow_run_id} if workflow_run_id else {}),
         },
     )
 

@@ -12,6 +12,11 @@ def main():
     if not os.getenv("DATABASE_URL", "").strip():
         print("Database setup skipped: DATABASE_URL is not configured.")
         return
+    # Schema setup uses the integration's direct connection. App requests keep
+    # the pooled DATABASE_URL supplied by Vercel in their separate processes.
+    direct_url = os.getenv("DATABASE_URL_UNPOOLED") or os.getenv("POSTGRES_URL_NON_POOLING")
+    if direct_url:
+        os.environ["DATABASE_URL"] = direct_url
     from alembic import command
     from alembic.config import Config
     from seeds.run_seeds import main as seed_vectors

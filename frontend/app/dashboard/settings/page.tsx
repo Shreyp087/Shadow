@@ -531,7 +531,7 @@ function RoleSettingsCard({
               </p>
               {draft.provider === "hosted_anthropic" ? (
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                  Uses the app's ANTHROPIC_API_KEY when configured, or an Anthropic key saved for this role.
+                  Uses the app&apos;s ANTHROPIC_API_KEY when configured, or an Anthropic key saved for this role.
                 </p>
               ) : null}
             </div>

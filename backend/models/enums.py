@@ -15,6 +15,18 @@ class TargetSystemType(str, Enum):
     ANTHROPIC = "anthropic"
 
 
+class LLMRole(str, Enum):
+    ATTACKER = "attacker"
+    MUTATOR = "mutator"
+    JUDGE = "judge"
+
+
+class LLMProvider(str, Enum):
+    HOSTED_OPENAI = "hosted_openai"
+    HOSTED_ANTHROPIC = "hosted_anthropic"
+    LOCAL_OPENAI_COMPATIBLE = "local_openai_compatible"
+
+
 class AttackVectorCategory(str, Enum):
     PROMPT_INJECTION = "PROMPT_INJECTION"
     JAILBREAK = "JAILBREAK"

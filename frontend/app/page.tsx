@@ -5,6 +5,7 @@ import { ArrowRight, Fingerprint, Orbit, ShieldAlert } from "lucide-react";
 import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
+import { useAppAuth } from "@/components/app-auth-provider";
 
 const signals = [
   {
@@ -18,13 +19,15 @@ const signals = [
     icon: ShieldAlert
   },
   {
-    title: "Immutable trust chain",
+    title: "Tamper-evident trust chain",
     description: "Each result is hashed into an append-only audit trail for defensible reporting.",
     icon: Fingerprint
   }
 ];
 
 export default function HomePage() {
+  const { mode } = useAppAuth();
+
   return (
     <main className="relative overflow-hidden">
       <div className="absolute inset-0 -z-20 bg-ledger-grid bg-[size:44px_44px] opacity-25" />
@@ -46,28 +49,54 @@ export default function HomePage() {
               </p>
             </div>
             <div className="flex flex-col gap-3 sm:flex-row">
-              <SignedOut>
-                <SignInButton mode="modal">
-                  <Button size="lg" className="gap-2">
-                    Get Started
-                    <ArrowRight className="h-4 w-4" />
-                  </Button>
-                </SignInButton>
-              </SignedOut>
-              <SignedIn>
+              {mode === "unavailable" ? (
+                <Button disabled size="lg" aria-describedby="workspace-availability">
+                  Get Started
+                </Button>
+              ) : mode === "demo" ? (
                 <Button asChild size="lg" className="gap-2">
                   <Link href="/dashboard" prefetch={false}>
                     Get Started
                     <ArrowRight className="h-4 w-4" />
                   </Link>
                 </Button>
-              </SignedIn>
-              <Button asChild size="lg" variant="outline">
-                <Link href="/dashboard/systems" prefetch={false}>
+              ) : (
+                <>
+                  <SignedOut>
+                    <SignInButton mode="modal">
+                      <Button size="lg" className="gap-2">
+                        Get Started
+                        <ArrowRight className="h-4 w-4" />
+                      </Button>
+                    </SignInButton>
+                  </SignedOut>
+                  <SignedIn>
+                    <Button asChild size="lg" className="gap-2">
+                      <Link href="/dashboard" prefetch={false}>
+                        Get Started
+                        <ArrowRight className="h-4 w-4" />
+                      </Link>
+                    </Button>
+                  </SignedIn>
+                </>
+              )}
+              {mode === "unavailable" ? (
+                <Button disabled size="lg" variant="outline" aria-describedby="workspace-availability">
                   Open Workspace
-                </Link>
-              </Button>
+                </Button>
+              ) : (
+                <Button asChild size="lg" variant="outline">
+                  <Link href="/dashboard/systems" prefetch={false}>
+                    Open Workspace
+                  </Link>
+                </Button>
+              )}
             </div>
+            {mode === "unavailable" ? (
+              <p id="workspace-availability" className="text-sm text-muted-foreground">
+                Workspace access will be available soon.
+              </p>
+            ) : null}
           </div>
 
           <div className="rounded-[2rem] border bg-white/85 p-6 shadow-[0_30px_90px_rgba(15,23,42,0.10)] backdrop-blur">

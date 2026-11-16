@@ -19,9 +19,6 @@ from .llm_client import request_text
 from .risk_scorer import RiskAssessment
 from .victim_connector import VictimConnector
 
-ATTACKER_MODEL = os.getenv("OPENAI_ATTACKER_MODEL", "gpt-4o-mini")
-
-
 class AttackResultScorer(Protocol):
     async def score(self, prompt_sent: str, response_received: str, vector_category: str) -> RiskAssessment: ...
 
@@ -49,6 +46,7 @@ class AttackerAgent:
         scorer_service: AttackResultScorer,
         trust_ledger: TrustLedgerAppender,
         mutation_engine: AttackMutationEngine,
+        model_name: str | None = None,
     ) -> None:
         self.db_session = db_session
         self.llm_client = llm_client
@@ -56,6 +54,7 @@ class AttackerAgent:
         self.scorer_service = scorer_service
         self.trust_ledger = trust_ledger
         self.mutation_engine = mutation_engine
+        self.model_name = model_name or os.getenv("OPENAI_ATTACKER_MODEL", "gpt-4o-mini")
 
     async def run_attack_vector(
         self,
@@ -64,6 +63,7 @@ class AttackerAgent:
         *,
         prompt_override: str | None = None,
         is_mutation: bool = False,
+        result_id: UUID | None = None,
     ) -> AttackResult:
         attack_run = await self.db_session.get(AttackRun, attack_run_id)
         if attack_run is None:
@@ -80,7 +80,7 @@ class AttackerAgent:
             raw_response_text = raw_response_text or f"[connector-error] {victim_response.error}"
 
         attack_result = AttackResult(
-            id=uuid.uuid4(),
+            id=result_id or uuid.uuid4(),
             attack_run_id=attack_run_id,
             attack_vector_id=vector.id,
             prompt_sent=rendered_prompt,
@@ -208,7 +208,7 @@ class AttackerAgent:
         try:
             adapted_instruction = await request_text(
                 self.llm_client,
-                model=ATTACKER_MODEL,
+                model=self.model_name,
                 max_tokens=220,
                 temperature=0.3,
                 system_prompt=(
@@ -228,6 +228,8 @@ class AttackerAgent:
                     f"Target API endpoint: {target_system.api_endpoint}\n"
                     f"Target type: {target_system.target_type.value}\n"
                     f"Target model: {target_system.model_name}\n\n"
+                    f"Target role: {getattr(target_system, 'role', None) or 'General Assistant'}\n"
+                    f"Target system instructions: {getattr(target_system, 'system_prompt', None) or 'Not specified.'}\n\n"
                     "Produce the best replacement text for the {target_instruction} placeholder."
                 ),
             )

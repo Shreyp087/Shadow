@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-import inspect
+import logging
+import asyncio
 import os
 from datetime import datetime, timezone
 from math import ceil
@@ -9,13 +10,10 @@ from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from fastapi.responses import Response
-from fastapi.security import HTTPAuthorizationCredentials
-from openai import AsyncOpenAI
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from auth.clerk import DEMO_CLERK_USER_ID, bearer_scheme, verify_clerk_token
-from app.core.config import get_settings
+from auth.clerk import verify_clerk_token
 from models.attack_result import AttackResult
 from models.attack_run import AttackRun
 from models.attack_vector import AttackVector
@@ -28,41 +26,33 @@ from schemas.attack_run import AttackRunResponse, AttackRunsSummaryResponse, Cre
 from schemas.common import APIResponse
 from routes._user_context import resolve_request_user
 from services.attacker_agent import AttackerAgent
+from services.llm_client_factory import RoleLLMClients, create_role_llm_clients
+from services.llm_role_settings import (
+    LLMSettingsConfigurationError,
+    load_effective_llm_role_settings,
+)
 from services.mutation_engine import MutationEngine
 from services.report_generator import ReportGenerator
 from services.risk_scorer import RiskScorer
 from services.trust_ledger import TrustLedger
 from services.victim_connector import VictimConnector
+from services.starter_targets import target_credential_source
 
 from app.db.session import get_db_session
 from models.base import AsyncSessionLocal
 
 router = APIRouter(prefix="/api/v1/attack-runs", tags=["attack-runs"])
-
-def get_openai_api_key() -> str:
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="OPENAI_API_KEY is not configured",
-        )
-    return api_key
+logger = logging.getLogger(__name__)
 
 
 DbSession = Annotated[AsyncSession, Depends(get_db_session)]
 ClerkUserId = Annotated[str, Depends(verify_clerk_token)]
-OpenAiApiKey = Annotated[str, Depends(get_openai_api_key)]
-OptionalClerkCredentials = Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)]
 
 
 async def get_read_only_user(
     db_session: DbSession,
-    credentials: OptionalClerkCredentials,
+    clerk_user_id: ClerkUserId,
 ) -> User:
-    if credentials is None or credentials.scheme.lower() != "bearer":
-        return await _get_demo_diagnostic_user(db_session)
-
-    clerk_user_id = await verify_clerk_token(credentials)
     return await _get_authenticated_user(db_session, clerk_user_id)
 
 
@@ -135,10 +125,11 @@ async def create_attack_run(
     background_tasks: BackgroundTasks,
     db_session: DbSession,
     clerk_user_id: ClerkUserId,
-    openai_api_key: OpenAiApiKey,
 ) -> APIResponse[AttackRunResponse]:
     user = await _get_authenticated_user(db_session, clerk_user_id)
     target_system = await _get_user_target_system(db_session, user, payload.target_system_id)
+    if target_credential_source(target_system) == "none":
+        raise HTTPException(status_code=409, detail="A provider credential is required for this target")
     vector_ids = await _resolve_vector_ids(db_session, payload.vector_category_filter)
 
     if not vector_ids:
@@ -146,6 +137,14 @@ async def create_attack_run(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No active attack vectors matched the requested filters",
         )
+
+    try:
+        await load_effective_llm_role_settings(db_session, user.id)
+    except LLMSettingsConfigurationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
 
     attack_run = AttackRun(
         target_system_id=target_system.id,
@@ -159,19 +158,38 @@ async def create_attack_run(
     await db_session.commit()
     await db_session.refresh(attack_run)
 
-    background_tasks.add_task(
-        _execute_attack_run_background,
-        attack_run.id,
-        target_system.id,
-        vector_ids,
-        openai_api_key,
-    )
+    workflow_run_id = None
+    if os.getenv("VERCEL") == "1":
+        try:
+            from vercel import workflow
+            from app.workflows import attack_scan
+
+            handle = await workflow.start(
+                attack_scan, str(attack_run.id), [str(item) for item in vector_ids]
+            )
+            workflow_run_id = handle.run_id
+            attack_run.workflow_run_id = workflow_run_id
+            await db_session.commit()
+        except Exception:
+            attack_run.status = AttackRunStatus.FAILED
+            attack_run.failure_reason = "The scan worker could not be queued. Please start a new scan."
+            attack_run.completed_at = datetime.now(timezone.utc)
+            await db_session.commit()
+            raise HTTPException(status_code=503, detail="Scan could not be queued") from None
+    else:
+        background_tasks.add_task(
+            _execute_attack_run_background,
+            attack_run.id,
+            target_system.id,
+            vector_ids,
+        )
 
     return APIResponse(
         data=AttackRunResponse.model_validate(attack_run),
         meta={
             "vector_count": len(vector_ids),
             "status": attack_run.status.value,
+            **({"workflow_run_id": workflow_run_id} if workflow_run_id else {}),
         },
     )
 
@@ -184,6 +202,7 @@ async def get_attack_run(
 ) -> APIResponse[AttackRunResponse]:
     user = await _get_authenticated_user(db_session, clerk_user_id)
     attack_run = await _get_user_attack_run(db_session, user, run_id)
+    await _reconcile_workflow_status(db_session, attack_run)
     summary = await _build_attack_run_summary(db_session, attack_run.id)
 
     return APIResponse(
@@ -286,9 +305,8 @@ async def _execute_attack_run_background(
     attack_run_id: UUID,
     target_system_id: UUID,
     vector_ids: list[UUID],
-    openai_api_key: str,
 ) -> None:
-    openai_client = AsyncOpenAI(api_key=openai_api_key)
+    role_clients: RoleLLMClients | None = None
 
     try:
         async with AsyncSessionLocal() as db_session:
@@ -297,26 +315,49 @@ async def _execute_attack_run_background(
 
             if attack_run is None:
                 return
-            if target_system is None:
+            if target_system is None or not target_system.is_active:
                 attack_run.status = AttackRunStatus.FAILED
                 attack_run.completed_at = datetime.now(timezone.utc)
                 await db_session.commit()
                 return
 
+            effective_settings = await load_effective_llm_role_settings(
+                db_session,
+                attack_run.user_id,
+            )
+            role_clients = await create_role_llm_clients(effective_settings)
+            attacker_client = role_clients.for_role("attacker")
+            mutator_client = role_clients.for_role("mutator")
+            judge_client = role_clients.for_role("judge")
+
             attacker = AttackerAgent(
                 db_session=db_session,
-                llm_client=openai_client,
+                llm_client=attacker_client.client,
                 victim_connector=VictimConnector(target_system),
-                scorer_service=RiskScorer(openai_client),
+                scorer_service=RiskScorer(
+                    judge_client.client,
+                    model_name=judge_client.model_name,
+                    target_role=target_system.role,
+                    target_system_prompt=target_system.system_prompt,
+                ),
                 trust_ledger=TrustLedger(db_session),
-                mutation_engine=MutationEngine(openai_client),
+                mutation_engine=MutationEngine(
+                    mutator_client.client,
+                    model_name=mutator_client.model_name,
+                ),
+                model_name=attacker_client.model_name,
             )
             await attacker.run_full_scan(
                 attack_run.id,
                 target_system,
                 vector_ids,
             )
-    except Exception:
+    except Exception as exc:
+        logger.error(
+            "Attack run background execution failed (run_id=%s, error_type=%s)",
+            attack_run_id,
+            exc.__class__.__name__,
+        )
         async with AsyncSessionLocal() as db_session:
             attack_run = await db_session.get(AttackRun, attack_run_id)
             if attack_run is not None:
@@ -324,30 +365,30 @@ async def _execute_attack_run_background(
                 attack_run.completed_at = datetime.now(timezone.utc)
                 await db_session.commit()
     finally:
-        close_result = openai_client.close()
-        if inspect.isawaitable(close_result):
-            await close_result
+        if role_clients is not None:
+            await role_clients.close()
+
+
+async def _reconcile_workflow_status(db_session: AsyncSession, run: AttackRun) -> None:
+    if os.getenv("VERCEL") != "1" or not run.workflow_run_id or run.status not in (
+        AttackRunStatus.PENDING, AttackRunStatus.RUNNING,
+    ):
+        return
+    try:
+        from vercel import workflow
+        state = await asyncio.wait_for(workflow.get_run(run.workflow_run_id).status(), timeout=5)
+    except Exception as exc:
+        logger.warning("Workflow status lookup failed (run_id=%s, error_type=%s)", run.id, type(exc).__name__)
+        return
+    if state in ("failed", "cancelled"):
+        run.status = AttackRunStatus.FAILED
+        run.failure_reason = "The scan worker stopped before completion. Start a new scan to retry."
+        run.completed_at = datetime.now(timezone.utc)
+        await db_session.commit()
 
 
 async def _get_authenticated_user(db_session: AsyncSession, clerk_user_id: str) -> User:
     return await resolve_request_user(db_session, clerk_user_id)
-
-
-async def _get_demo_diagnostic_user(db_session: AsyncSession) -> User:
-    if get_settings().environment.lower() == "production":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing Bearer token",
-        )
-
-    demo_user = await db_session.scalar(select(User).where(User.clerk_user_id == DEMO_CLERK_USER_ID))
-    if demo_user is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Demo user not found. Run python -m seeds.demo_data",
-        )
-
-    return demo_user
 
 
 async def _get_user_target_system(db_session: AsyncSession, user: User, target_system_id: UUID) -> TargetSystem:
@@ -360,6 +401,11 @@ async def _get_user_target_system(db_session: AsyncSession, user: User, target_s
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Target system was not found for the authenticated user",
+        )
+    if not target_system.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Target system is inactive",
         )
     return target_system
 

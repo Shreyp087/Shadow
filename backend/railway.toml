@@ -5,9 +5,15 @@
 # DEBUG
 # DATABASE_URL
 # FRONTEND_ORIGIN
-# ANTHROPIC_API_KEY
+# OPENAI_API_KEY
+# OPENAI_ATTACKER_MODEL (optional)
+# OPENAI_MUTATION_MODEL (optional)
+# OPENAI_SCORER_MODEL (optional)
 # ENCRYPTION_KEY
-# CLERK_JWT_KEY or CLERK_JWKS_URL
+# ENCRYPTION_KEY_PREVIOUS (optional, temporary old keys during rotation)
+# ALLOW_INSECURE_TARGET_ENDPOINTS (development only; keep false in production)
+# ALLOW_PRIVATE_TARGET_ENDPOINTS (optional for explicitly authorized internal targets)
+# CLERK_JWT_KEY, CLERK_JWKS_URL, or CLERK_FRONTEND_API_URL
 # CLERK_ISSUER
 # CLERK_AUTHORIZED_PARTIES
 
@@ -15,6 +21,7 @@
 builder = "NIXPACKS"
 
 [deploy]
+preDeployCommand = ["alembic upgrade head"]
 startCommand = "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"
 healthcheckPath = "/health"
 healthcheckTimeout = 120

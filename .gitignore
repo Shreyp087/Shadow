@@ -5,6 +5,8 @@ out/
 dist/
 coverage/
 *.tsbuildinfo
+.vercel/
+.workflow-data/
 
 # Python
 __pycache__/
@@ -19,8 +21,8 @@ env/
 
 # Environment
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
 
 # Editor / OS
 .DS_Store

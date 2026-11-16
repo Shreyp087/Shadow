@@ -20,7 +20,7 @@ from models.trust_ledger_entry import TrustLedgerEntry
 from models.user import User
 
 
-async def main() -> None:
+async def main() -> int:
     try:
         async with AsyncSessionLocal() as session:
             users_count = int((await session.scalar(select(func.count(User.id)))) or 0)
@@ -46,16 +46,21 @@ async def main() -> None:
         print("===========================")
         print(f"Database connection failed: {exc}")
         print("DEMO DATA MISSING - run python -m seeds.demo_data")
-        return
+        return 1
 
     print("ShadowLedger Demo Data Check")
     print("===========================")
     print(f"users: {users_count}")
     print(f"target_systems: {len(target_systems)}")
+    active_presentation_targets = [
+        system
+        for system in target_systems
+        if system.is_active and ".shadowledger.demo" in system.api_endpoint
+    ]
     if target_systems:
         print("target_system names:")
         for system in target_systems:
-            print(f"  - {system.name}")
+            print(f"  - {system.name} | active={system.is_active}")
 
     print(f"attack_runs: {len(attack_runs)}")
     if attack_runs:
@@ -75,11 +80,17 @@ async def main() -> None:
 
     print(f"trust_ledger_entries: {trust_ledger_count}")
 
+    if active_presentation_targets:
+        print("ACTIVE PRESENTATION TARGETS FOUND - rerun python -m seeds.demo_data")
+        return 1
+
     if len(attack_runs) >= 3 and attack_results_count >= 75:
         print("DEMO DATA OK")
+        return 0
     else:
         print("DEMO DATA MISSING - run python -m seeds.demo_data")
+        return 1
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    raise SystemExit(asyncio.run(main()))

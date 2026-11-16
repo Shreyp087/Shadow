@@ -1,8 +1,9 @@
 "use client";
 
-import { useAuth } from "@clerk/nextjs";
 import { useMemo } from "react";
 
+import { useAppAuth } from "@/components/app-auth-provider";
+import { isLocalDemoAuthEnabled } from "@/lib/auth-mode";
 import type {
   APIResponse,
   APIResponseWithMeta,
@@ -13,12 +14,16 @@ import type {
   AttackSurfaceSummaryItem,
   CreateAttackRunRequest,
   CreateTargetSystemRequest,
+  LLMConnectionTestResponse,
+  LLMRole,
+  LLMRoleSettingResponse,
   PaginationMeta,
   TargetRiskTrendPoint,
-  TargetSystemResponse
+  TargetSystemResponse,
+  UpdateLLMRoleSettingRequest
 } from "@/types/api";
 
-type TokenGetter = ReturnType<typeof useAuth>["getToken"];
+type TokenGetter = ReturnType<typeof useAppAuth>["getToken"];
 
 export class APIClientError extends Error {
   status: number;
@@ -51,10 +56,6 @@ export function buildApiUrl(path: string) {
   return `${getApiBaseUrl()}${normalizedPath}`;
 }
 
-function shouldAllowAnonymousDevelopmentRequests() {
-  return process.env.NODE_ENV === "development";
-}
-
 async function buildAuthHeaders(init: RequestInit, getToken: TokenGetter, accept: string) {
   const token = await getToken();
   const headers = new Headers(init.headers);
@@ -63,7 +64,7 @@ async function buildAuthHeaders(init: RequestInit, getToken: TokenGetter, accept
 
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
-  } else if (!shouldAllowAnonymousDevelopmentRequests()) {
+  } else if (!isLocalDemoAuthEnabled()) {
     throw new APIClientError("Authentication token is unavailable.", 401);
   }
 
@@ -307,6 +308,26 @@ export function createApiClient(getToken: TokenGetter) {
         getToken
       );
     },
+    async getLlmRoleSettings() {
+      return request<LLMRoleSettingResponse[]>("/api/v1/llm-role-settings", { method: "GET" }, getToken);
+    },
+    async updateLlmRoleSetting(role: LLMRole, payload: UpdateLLMRoleSettingRequest) {
+      return request<LLMRoleSettingResponse>(
+        `/api/v1/llm-role-settings/${role}`,
+        {
+          method: "PUT",
+          body: JSON.stringify(payload)
+        },
+        getToken
+      );
+    },
+    async testLlmRoleSetting(role: LLMRole) {
+      return request<LLMConnectionTestResponse>(
+        `/api/v1/llm-role-settings/${role}/test`,
+        { method: "POST" },
+        getToken
+      );
+    },
     async getTargetRiskTrend(targetSystemId: string) {
       return request<TargetRiskTrendPoint[]>(
         `/api/v1/analytics/target/${targetSystemId}/trend`,
@@ -325,7 +346,7 @@ export function createApiClient(getToken: TokenGetter) {
 }
 
 export function useApiClient() {
-  const { getToken } = useAuth();
+  const { getToken } = useAppAuth();
 
   return useMemo(() => createApiClient(getToken), [getToken]);
 }

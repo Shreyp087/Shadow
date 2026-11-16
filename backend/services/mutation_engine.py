@@ -9,12 +9,10 @@ from models.attack_vector import AttackVector
 from models.enums import RiskCategory
 from .llm_client import request_text
 
-MUTATION_MODEL = os.getenv("OPENAI_MUTATION_MODEL", "gpt-4o-mini")
-
-
 class MutationEngine:
-    def __init__(self, llm_client: Any) -> None:
+    def __init__(self, llm_client: Any, model_name: str | None = None) -> None:
         self.llm_client = llm_client
+        self.model_name = model_name or os.getenv("OPENAI_MUTATION_MODEL", "gpt-4o-mini")
 
     async def mutate(self, original_vector: AttackVector, previous_results: list[AttackResult]) -> list[str]:
         recent_results = previous_results[-8:]
@@ -23,7 +21,7 @@ class MutationEngine:
         try:
             response_text = await request_text(
                 self.llm_client,
-                model=MUTATION_MODEL,
+                model=self.model_name,
                 max_tokens=500,
                 temperature=0.7,
                 system_prompt=(

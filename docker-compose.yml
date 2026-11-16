@@ -23,20 +23,29 @@ services:
     command: >
       sh -c "pip install --no-cache-dir -r requirements.txt &&
       alembic upgrade head &&
+      python -m seeds.run_seeds &&
+      python -m seeds.demo_data &&
       uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
     environment:
       APP_NAME: ${APP_NAME:-ShadowLedger API}
       ENVIRONMENT: ${ENVIRONMENT:-development}
-      DEBUG: ${DEBUG:-true}
-      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://shadowledger:shadowledger@postgres:5432/shadowledger}
+      DEBUG: ${DEBUG:-false}
+      DATABASE_URL: ${DOCKER_DATABASE_URL:-postgresql+asyncpg://shadowledger:shadowledger@postgres:5432/shadowledger}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:4200}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-replace-with-a-generated-fernet-key}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ENCRYPTION_KEY_PREVIOUS: ${ENCRYPTION_KEY_PREVIOUS:-}
+      ALLOW_INSECURE_TARGET_ENDPOINTS: ${ALLOW_INSECURE_TARGET_ENDPOINTS:-false}
+      ALLOW_PRIVATE_TARGET_ENDPOINTS: ${ALLOW_PRIVATE_TARGET_ENDPOINTS:-false}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_ATTACKER_MODEL: ${OPENAI_ATTACKER_MODEL:-gpt-4o-mini}
+      OPENAI_MUTATION_MODEL: ${OPENAI_MUTATION_MODEL:-gpt-4o-mini}
+      OPENAI_SCORER_MODEL: ${OPENAI_SCORER_MODEL:-gpt-4o-mini}
       CLERK_JWT_KEY: ${CLERK_JWT_KEY:-}
       CLERK_ISSUER: ${CLERK_ISSUER:-}
-      CLERK_JWKS_URL: ${CLERK_JWKS_URL:-https://api.clerk.com/v1/jwks}
+      CLERK_JWKS_URL: ${CLERK_JWKS_URL:-}
+      CLERK_FRONTEND_API_URL: ${CLERK_FRONTEND_API_URL:-}
       CLERK_AUTHORIZED_PARTIES: ${CLERK_AUTHORIZED_PARTIES:-http://localhost:4200}
+      NEXT_PUBLIC_DEMO_AUTH: ${NEXT_PUBLIC_DEMO_AUTH:-true}
     volumes:
       - .:/workspace
     ports:
@@ -54,12 +63,13 @@ services:
     image: node:20-alpine
     container_name: shadowledger-frontend
     working_dir: /workspace/frontend
-    command: sh -c "npm install && npx next dev --hostname 0.0.0.0 --port 4200"
+    command: sh -c "npm ci && npx next dev --hostname 0.0.0.0 --port 4200"
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
       RAILWAY_BACKEND_URL: ${RAILWAY_BACKEND_URL:-http://localhost:8000}
-      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-pk_test_your_publishable_key}
-      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:-sk_test_your_secret_key}
+      NEXT_PUBLIC_DEMO_AUTH: ${NEXT_PUBLIC_DEMO_AUTH:-true}
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:-}
       CHOKIDAR_USEPOLLING: "true"
       WATCHPACK_POLLING: "true"
     volumes:

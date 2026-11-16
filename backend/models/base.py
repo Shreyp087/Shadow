@@ -3,11 +3,13 @@ from __future__ import annotations
 import uuid
 from collections.abc import AsyncGenerator
 from datetime import datetime
+import os
 
 from sqlalchemy import DateTime, MetaData, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.pool import NullPool
 
 from app.core.config import get_settings
 
@@ -47,6 +49,7 @@ engine = create_async_engine(
     settings.database_url,
     echo=settings.debug,
     future=True,
+    **({"poolclass": NullPool} if os.getenv("VERCEL") == "1" else {}),
 )
 AsyncSessionLocal = async_sessionmaker(
     bind=engine,

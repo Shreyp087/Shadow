@@ -25,6 +25,8 @@ class TargetSystem(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    role: Mapped[str] = mapped_column(String(120), nullable=False, default="General Assistant", server_default="General Assistant")
+    system_prompt: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
     api_endpoint: Mapped[str] = mapped_column(String(2048), nullable=False)
     target_type: Mapped[TargetSystemType] = mapped_column(
         Enum(

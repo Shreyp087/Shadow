@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import os
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -30,7 +29,6 @@ from utils.encryption import encrypt_value
 
 DEMO_CLERK_USER_ID = "demo_shadowledger_host"
 DEMO_USER_EMAIL = "demo@shadowledger.ai"
-DEMO_ENCRYPTION_KEY = "AhIUd3lWu3jIM0Vm4gX0iMlYjELV78fUjSzksEiFsPc="
 HR_TARGET_NAME = "Internal HR Assistant"
 SUPPORT_TARGET_NAME = "GPT-4 Customer Support Bot"
 
@@ -172,7 +170,7 @@ RUN_SCORE_PROFILES: dict[str, dict[str, int]] = {
 
 
 async def seed_demo_data(session: AsyncSession) -> dict[str, int | str]:
-    _ensure_demo_encryption_key()
+    _require_demo_encryption_key()
     await seed_attack_vectors(session)
 
     demo_user = await _get_or_create_demo_user(session)
@@ -336,7 +334,7 @@ async def _get_or_create_target_systems(session: AsyncSession, user: User) -> di
                 target_type=definition["target_type"],
                 api_key_encrypted=encrypted_key,
                 model_name=definition["model_name"],
-                is_active=True,
+                is_active=False,
             )
             session.add(system)
             await session.flush()
@@ -346,7 +344,7 @@ async def _get_or_create_target_systems(session: AsyncSession, user: User) -> di
             system.target_type = definition["target_type"]
             system.api_key_encrypted = encrypted_key
             system.model_name = definition["model_name"]
-            system.is_active = True
+            system.is_active = False
             await session.flush()
 
         target_systems[name] = system
@@ -586,9 +584,13 @@ def _sha256(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
-def _ensure_demo_encryption_key() -> None:
-    if not os.getenv("ENCRYPTION_KEY"):
-        os.environ["ENCRYPTION_KEY"] = DEMO_ENCRYPTION_KEY
+def _require_demo_encryption_key() -> None:
+    try:
+        encrypt_value("shadowledger-demo-key-validation")
+    except ValueError as exc:
+        raise ValueError(
+            "A valid ENCRYPTION_KEY must be configured before seeding demo data"
+        ) from exc
 
 
 async def main() -> None:

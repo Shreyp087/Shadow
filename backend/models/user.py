@@ -14,3 +14,7 @@ class User(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
 
     target_systems: Mapped[list["TargetSystem"]] = relationship(back_populates="user")
     attack_runs: Mapped[list["AttackRun"]] = relationship(back_populates="user")
+    llm_role_settings: Mapped[list["LLMRoleSetting"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )

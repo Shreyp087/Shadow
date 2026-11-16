@@ -14,9 +14,12 @@ load_dotenv()
 class Settings(BaseModel):
     app_name: str = "ShadowLedger API"
     environment: str = "development"
-    debug: bool = True
+    debug: bool = False
     database_url: str = "postgresql+asyncpg://shadowledger:shadowledger@localhost:5432/shadowledger"
-    frontend_origin: str = "http://localhost:3000"
+    frontend_origin: str = "http://localhost:4200"
+    demo_auth_enabled: bool = False
+    allow_insecure_target_endpoints: bool = False
+    allow_private_target_endpoints: bool = False
 
 
 @lru_cache
@@ -25,31 +28,57 @@ def get_settings() -> Settings:
         "DATABASE_URL",
         "postgresql+asyncpg://shadowledger:shadowledger@localhost:5432/shadowledger",
     )
-    environment = os.getenv("ENVIRONMENT", "development")
+    environment = os.getenv(
+        "ENVIRONMENT", "production" if os.getenv("VERCEL") == "1" else "development"
+    )
+    deployment_host = (
+        os.getenv("VERCEL_PROJECT_PRODUCTION_URL")
+        if os.getenv("VERCEL_ENV") == "production"
+        else os.getenv("VERCEL_URL")
+    )
+    default_origin = f"https://{deployment_host}" if deployment_host else "http://localhost:4200"
 
     return Settings(
         app_name=os.getenv("APP_NAME", "ShadowLedger API"),
         environment=environment,
-        debug=os.getenv("DEBUG", "true").lower() == "true",
+        debug=_environment_flag("DEBUG"),
         database_url=_normalize_database_url(raw_database_url, environment),
-        frontend_origin=os.getenv("FRONTEND_ORIGIN", "http://localhost:3000"),
+        frontend_origin=os.getenv("FRONTEND_ORIGIN", default_origin),
+        demo_auth_enabled=_environment_flag("NEXT_PUBLIC_DEMO_AUTH"),
+        allow_insecure_target_endpoints=_environment_flag("ALLOW_INSECURE_TARGET_ENDPOINTS"),
+        allow_private_target_endpoints=_environment_flag("ALLOW_PRIVATE_TARGET_ENDPOINTS"),
     )
 
 
 def _normalize_database_url(database_url: str, environment: str) -> str:
-    if environment.lower() == "production" or _running_in_docker():
-        return database_url
-
     try:
         parsed_url = make_url(database_url)
     except Exception:
         return database_url
 
-    if parsed_url.host not in {"postgres", "db"}:
-        return database_url
+    if parsed_url.drivername in {"postgres", "postgresql"}:
+        parsed_url = parsed_url.set(drivername="postgresql+asyncpg")
 
-    return parsed_url.set(host="localhost").render_as_string(hide_password=False)
+    if parsed_url.drivername == "postgresql+asyncpg" and (
+        "sslmode" in parsed_url.query or "channel_binding" in parsed_url.query
+    ):
+        # Managed Postgres URLs use libpq parameters. Psycopg preserves both TLS
+        # and channel binding instead of dropping these protections for asyncpg.
+        parsed_url = parsed_url.set(drivername="postgresql+psycopg")
+
+    if (
+        environment.lower() != "production"
+        and not _running_in_docker()
+        and parsed_url.host in {"postgres", "db"}
+    ):
+        parsed_url = parsed_url.set(host="localhost")
+
+    return parsed_url.render_as_string(hide_password=False)
 
 
 def _running_in_docker() -> bool:
     return Path("/.dockerenv").exists()
+
+
+def _environment_flag(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}

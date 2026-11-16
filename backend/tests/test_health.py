@@ -48,3 +48,21 @@ def test_healthcheck_reports_database_errors() -> None:
 
     assert response.status_code == 503
     assert response.json() == {"status": "ok", "version": "1.0.0", "db": "error"}
+
+
+def test_api_responses_include_no_store_security_headers() -> None:
+    async def override_session() -> AsyncGenerator[HealthySession, None]:
+        yield HealthySession()
+
+    app.dependency_overrides[get_db_session] = override_session
+    client = TestClient(app)
+
+    response = client.get("/api/health")
+
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["pragma"] == "no-cache"
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["referrer-policy"] == "no-referrer"
